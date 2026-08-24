@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+:root {
+  /* Official Government Operations Design System */
+  --bg-main: #F8FAFC; /* very light gray */
+  --bg-card: #FFFFFF;
+  --border-color: #D8E0E8;
+  
+  --primary-navy: #0F2742;
+  --secondary-blue: #1F5F8B;
+  
+  --status-critical: #D92D20; /* Red */
+  --status-warning: #F59E0B; /* Amber */
+  --status-success: #10B981; /* Green */
+  
+  --text-primary: #243447;
+  --text-muted: #667788;
+  --text-inverse: #FFFFFF;
+
+  font-family: 'Inter', 'Noto Sans', 'Arial', sans-serif;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Base headings */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--primary-navy);
+  font-weight: 600;
+}
+
+/* Custom Scrollbar - Light */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Stub out old glow classes */
+.glow-cyan, .glow-critical, .glow-high, .scanline, .radar-pulse {
+  /* Removed effects */
+}
