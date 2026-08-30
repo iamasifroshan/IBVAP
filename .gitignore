@@ -35,3 +35,21 @@ pip-delete-this-directory/
 *.njsproj
 *.sln
 *.sw?
+
+# Database & Runtime Storage
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/evidence/*
+!backend/storage/evidence/.gitkeep
+backend/storage/extracted_frames/*
+!backend/storage/extracted_frames/.gitkeep
+backend/storage/training_uploads/*
+!backend/storage/training_uploads/.gitkeep
+backend/storage/videos/*
+!backend/storage/videos/.gitkeep
+
+# Environment files
+.env.local
+.env.*.local
+
