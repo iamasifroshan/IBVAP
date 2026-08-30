@@ -17,7 +17,7 @@ export type PageId =
   | 'system-verification'
   | 'ai-training-center';
 
-export type NetworkStatus = 'online' | 'limited' | 'offline' | 'syncing';
+export type NetworkStatus = 'online' | 'limited' | 'offline' | 'syncing' | 'connecting';
 
 export type EnvironmentCondition = 
   | 'normal' 
@@ -86,7 +86,7 @@ export interface Camera {
   streamUrl: string;
   fps: number;
   resolution: string;
-  status: 'online' | 'degraded' | 'offline';
+  status: 'online' | 'degraded' | 'offline' | 'CONFIGURED' | 'CONNECTING' | 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'ERROR';
   healthScore: number;
   visibilityScore: number; // 0-100%
   lightingLux: number; // e.g. 12 lux
@@ -98,6 +98,7 @@ export interface Camera {
   lastActivity: string;
   nightVisionMode: boolean;
   dehazeEnabled: boolean;
+  autoStartInference: boolean;
 }
 
 export interface VirtualZone {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { ShieldAlert, Video, HardDrive, CheckCircle2, Activity, Camera, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, Video, HardDrive, CheckCircle2, Activity, Camera, AlertTriangle, WifiOff, Radio } from 'lucide-react';
 import { ThreatScoreBadge } from '../common/ThreatScoreBadge';
 import { ibvapApi } from '../../services/apiClient';
 import { CameraAnalysisModal } from '../common/CameraAnalysisModal';
@@ -12,7 +12,7 @@ export const CommandOverviewPage: React.FC = () => {
   const [videoErrors, setVideoErrors] = useState<Record<string, boolean>>({});
 
   const criticalCount = incidents.filter(i => i.severity === 'critical' && i.status === 'active').length;
-  const onlineCount = cameras.filter(c => c.status === 'online').length;
+  const onlineCount = cameras.filter(c => c.status?.toUpperCase() === 'ONLINE' || c.status?.toUpperCase() === 'DEGRADED').length;
   
   // The primary active feed (prototype simulation or actual first camera)
   const mainCamera = cameras[0];
@@ -128,7 +128,31 @@ export const CommandOverviewPage: React.FC = () => {
                     >
                       {/* Feed Image/Video Container (16:9) */}
                       <div className="relative w-full aspect-video bg-slate-900 overflow-hidden shrink-0">
-                        {videoUrl && !videoErrors[cam.id] ? (
+                        {cam.status?.toUpperCase() === 'OFFLINE' || cam.status?.toUpperCase() === 'ERROR' ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-950 border border-red-950/20">
+                            <WifiOff className="w-8 h-8 mb-2 text-red-500/70" />
+                            <span className="text-[11px] font-bold tracking-wider uppercase text-red-500">OFFLINE</span>
+                            <span className="text-[10px] text-slate-500 mt-1">CAMERA DISCONNECTED OR UNREACHABLE</span>
+                          </div>
+                        ) : cam.protocol === 'WEBCAM' ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 to-slate-900 border border-emerald-950/20">
+                            <div className="relative mb-2">
+                              <Camera className="w-8 h-8 text-emerald-500/80" />
+                              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-slate-900 animate-pulse"></span>
+                            </div>
+                            <span className="text-[11px] font-bold tracking-wider uppercase text-emerald-400">LIVE WEBCAM FEED</span>
+                            <span className="text-[10px] text-slate-400 mt-1">STREAM AVAILABLE — SELECT FOR SURVEILLANCE</span>
+                          </div>
+                        ) : cam.protocol === 'RTSP' ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 to-slate-900 border border-cyan-950/20">
+                            <div className="relative mb-2">
+                              <Radio className="w-8 h-8 text-cyan-400/80" />
+                              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-cyan-400 rounded-full border-2 border-slate-900 animate-pulse"></span>
+                            </div>
+                            <span className="text-[11px] font-bold tracking-wider uppercase text-cyan-400">RTSP LIVE STREAM</span>
+                            <span className="text-[10px] text-slate-400 mt-1">IP CAMERA CONNECTED — ONLINE</span>
+                          </div>
+                        ) : videoUrl && !videoErrors[cam.id] ? (
                           <video 
                             src={videoUrl}
                             autoPlay
@@ -144,9 +168,9 @@ export const CommandOverviewPage: React.FC = () => {
                           />
                         ) : (
                           <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 bg-slate-900">
-                            <Video className="w-8 h-8 mb-2 opacity-50" />
-                            <span className="text-[11px] font-semibold tracking-wider uppercase text-red-500">VIDEO SOURCE UNAVAILABLE</span>
-                            <span className="text-[10px] text-slate-500 mt-1">NO VIDEO SOURCE LINKED OR LOAD FAILURE</span>
+                            <AlertTriangle className="w-8 h-8 mb-2 text-orange-500/70" />
+                            <span className="text-[11px] font-semibold tracking-wider uppercase text-orange-500">LOAD FAILED</span>
+                            <span className="text-[10px] text-slate-500 mt-1">VIDEO SOURCE TEMPORARILY UNAVAILABLE</span>
                           </div>
                         )}
 
@@ -156,10 +180,27 @@ export const CommandOverviewPage: React.FC = () => {
                             {cam.name}
                           </span>
                           
-                          <span className="px-2 py-0.5 text-[9px] font-bold rounded flex items-center gap-1.5 shadow-sm backdrop-blur-sm border uppercase tracking-wider bg-[#10B981]/20 text-[#10B981] border-[#10B981]/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
-                            ONLINE
-                          </span>
+                          {cam.status?.toUpperCase() === 'ONLINE' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded flex items-center gap-1.5 shadow-sm backdrop-blur-sm border uppercase tracking-wider bg-[#10B981]/20 text-[#10B981] border-[#10B981]/30">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
+                              ONLINE
+                            </span>
+                          ) : cam.status?.toUpperCase() === 'DEGRADED' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded flex items-center gap-1.5 shadow-sm backdrop-blur-sm border uppercase tracking-wider bg-[#F59E0B]/20 text-[#F59E0B] border-[#F59E0B]/30">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] animate-pulse"></span>
+                              DEGRADED
+                            </span>
+                          ) : cam.status?.toUpperCase() === 'ERROR' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded flex items-center gap-1.5 shadow-sm backdrop-blur-sm border uppercase tracking-wider bg-red-100 text-red-800 border-red-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                              ERROR
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[9px] font-bold rounded flex items-center gap-1.5 shadow-sm backdrop-blur-sm border uppercase tracking-wider bg-[#D92D20]/20 text-[#D92D20] border-[#D92D20]/30">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#D92D20]"></span>
+                              OFFLINE
+                            </span>
+                          )}
                         </div>
                       </div>
 

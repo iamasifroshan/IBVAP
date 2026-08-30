@@ -3,6 +3,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import numpy as np
+import cv2
+import time
 from datetime import datetime
 
 logger = logging.getLogger("api.detections")
@@ -42,13 +45,15 @@ def run_yolo_detection_with_tracking(
         raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
 
     logger.info(f"[IVAP] Camera resolved — camera_id='{cam.camera_id}' source_type='{cam.source_type}' source_url='{cam.source_url}'")
-    from video.stream_manager import stream_manager, SOURCE_MP4, SOURCE_WEBCAM, SOURCE_RTSP
+    from video.stream_manager import stream_manager, SOURCE_WEBCAM, SOURCE_RTSP
 
     # Classify source type
     source_type = cam.source_type or stream_manager.classify_source(cam.source_url or "")
+    if source_type == "MP4_FILE":
+        source_type = "SIMULATED_FILE"
 
     # ── Handle WEBCAM / RTSP live sources ─────────────────────────────────────
-    if source_type in (SOURCE_WEBCAM, SOURCE_RTSP, "WEBCAM", "RTSP"):
+    if source_type.upper() in (SOURCE_WEBCAM, SOURCE_RTSP, "WEBCAM", "RTSP"):
         frames_with_idx, video_id, err = stream_manager.extract_live_frames(
             source_url=cam.source_url,
             source_type=source_type,
@@ -57,7 +62,7 @@ def run_yolo_detection_with_tracking(
         )
         if err or not frames_with_idx:
             # Mark camera offline and raise
-            cam.status = "offline"
+            cam.status = "OFFLINE"
             cam.last_activity = f"Stream unavailable: {err or 'No frames captured'}"
             db.commit()
             raise HTTPException(
@@ -78,7 +83,7 @@ def run_yolo_detection_with_tracking(
         video_path = None  # Live source — no file path for evidence clips
 
         # Update camera to online
-        cam.status = "online"
+        cam.status = "ONLINE"
         cam.last_activity = f"Live {source_type} inference: {len(frames_with_idx)} frames"
         db.commit()
 
@@ -86,9 +91,7 @@ def run_yolo_detection_with_tracking(
     else:
         STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storage", "videos")
 
-        # ── Resolve video path (4 fallback layers) ──
-        # Layer 1: Direct source_url path
-        video_path = cam.source_url if (cam.source_url and os.path.exists(cam.source_url)) else None
+        video_path = stream_manager.resolve_video_path(cam.source_url) if cam.source_url else None
 
         # Layer 2: Strip UUID prefix and match by original filename in storage dir
         if not video_path and cam.source_url:
@@ -410,9 +413,7 @@ async def detect_single_frame(
     Only returns detections of class 'person'.
     Evaluates detections against camera's active zones.
     """
-    import numpy as np
-    import cv2
-    import time
+    # Moved lazy imports to module level
     
     cam = db.query(CameraModel).filter(
         (CameraModel.camera_id == camera_id) | (CameraModel.id == camera_id)

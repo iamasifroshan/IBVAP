@@ -45,7 +45,9 @@ def map_camera_to_response(c: CameraModel) -> CameraResponse:
         activeZone=c.active_zone,
         lastActivity=c.last_activity,
         nightVisionMode=c.night_vision_mode,
-        dehazeEnabled=c.dehaze_enabled
+        dehazeEnabled=c.dehaze_enabled,
+        auto_start_inference=c.auto_start_inference,
+        autoStartInference=c.auto_start_inference
     )
 
 @router.get("", response_model=List[CameraResponse])
@@ -80,9 +82,9 @@ def create_camera(camera_in: CameraCreate, db: Session = Depends(get_db)):
         health_score = verify["health_score"]
         if verify["resolution"] and verify["resolution"] != "N/A":
             resolution = verify["resolution"]
-        if source_status == "online":
+        if source_status.upper() == "ONLINE":
             last_activity = "Stream verified online"
-        elif source_status == "degraded":
+        elif source_status.upper() == "DEGRADED":
             last_activity = "Stream degraded - limited frames"
         else:
             last_activity = f"Offline: {verify.get('error', 'Stream unavailable')[:80]}"
@@ -94,7 +96,7 @@ def create_camera(camera_in: CameraCreate, db: Session = Depends(get_db)):
         name=camera_in.name,
         sector=camera_in.sector,
         outpost=camera_in.outpost,
-        source_type=camera_in.source_type,
+        source_type="SIMULATED_FILE" if camera_in.source_type == "MP4_FILE" else camera_in.source_type,
         source_url=camera_in.source_url,
         status=source_status,
         health_score=health_score,
@@ -108,6 +110,7 @@ def create_camera(camera_in: CameraCreate, db: Session = Depends(get_db)):
         last_activity=last_activity,
         night_vision_mode=camera_in.night_vision_mode,
         dehaze_enabled=camera_in.dehaze_enabled,
+        auto_start_inference=camera_in.auto_start_inference,
     )
     db.add(db_cam)
     db.commit()
@@ -137,9 +140,10 @@ def test_camera_source(camera_id: str, db: Session = Depends(get_db)):
     if verify.get("fps") and verify["fps"] > 0:
         c.fps = int(verify["fps"])
 
-    if verify["status"] == "online":
+    status_upper = verify["status"].upper()
+    if status_upper == "ONLINE":
         c.last_activity = f"Source verified — {verify['resolution']} @ {verify['fps']:.0f}fps"
-    elif verify["status"] == "degraded":
+    elif status_upper == "DEGRADED":
         c.last_activity = "Source degraded — limited frame response"
     else:
         c.last_activity = f"Offline: {verify.get('error', 'Stream unavailable')[:100]}"
@@ -179,7 +183,7 @@ def update_camera_source(
 
     c.source_url = source_url
     if source_type:
-        c.source_type = source_type
+        c.source_type = "SIMULATED_FILE" if source_type == "MP4_FILE" else source_type
     c.status = verify["status"]
     c.health_score = verify["health_score"]
     if verify.get("resolution") and verify["resolution"] not in ("N/A", "Unknown", "0x0"):
@@ -211,6 +215,22 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db)):
     db.delete(c)
     db.commit()
     return None
+
+@router.patch("/{camera_id}/inference-auto-start", response_model=CameraResponse)
+def update_camera_inference_auto_start(
+    camera_id: str,
+    auto_start: bool,
+    db: Session = Depends(get_db)
+):
+    c = db.query(CameraModel).filter(
+        (CameraModel.camera_id == camera_id) | (CameraModel.id == camera_id)
+    ).first()
+    if not c:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+    c.auto_start_inference = auto_start
+    db.commit()
+    db.refresh(c)
+    return map_camera_to_response(c)
 
 
 

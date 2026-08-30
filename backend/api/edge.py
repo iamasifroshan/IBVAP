@@ -11,9 +11,9 @@ router = APIRouter(tags=["Edge & System"])
 @router.get("/edge/status", response_model=SystemMetricsSchema)
 def get_edge_status(db: Session = Depends(get_db)):
     total_cameras = db.query(CameraModel).count()
-    active_cameras = db.query(CameraModel).filter(CameraModel.status == "online").count()
-    degraded_cameras = db.query(CameraModel).filter(CameraModel.status == "degraded").count()
-    offline_cameras = db.query(CameraModel).filter(CameraModel.status == "offline").count()
+    active_cameras = db.query(CameraModel).filter(CameraModel.status.in_(["online", "ONLINE"])).count()
+    degraded_cameras = db.query(CameraModel).filter(CameraModel.status.in_(["degraded", "DEGRADED"])).count()
+    offline_cameras = db.query(CameraModel).filter(CameraModel.status.in_(["offline", "OFFLINE"])).count()
     
     active_alerts = db.query(IncidentModel).filter(IncidentModel.status == "active").count()
     critical_alerts = db.query(IncidentModel).filter(

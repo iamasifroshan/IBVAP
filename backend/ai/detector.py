@@ -3,6 +3,7 @@ import cv2
 import time
 import logging
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 
 logger = logging.getLogger("ibvap.ai")
 
@@ -15,22 +16,56 @@ class YoloDetector:
     """
 
     def __init__(self, model_name: str = "yolov8n.pt", default_conf: float = 0.35):
-        self.model_name = model_name
+        # Dynamically resolve absolute path based on backend directory
+        backend_dir = Path(__file__).resolve().parent.parent
+        
+        target_path = Path(model_name)
+        if target_path.is_absolute() and target_path.exists():
+            self.model_path = target_path
+        else:
+            # Prefer permanent structure: backend/models/<model_name>
+            preferred_path = backend_dir / "models" / model_name
+            fallback_path = backend_dir / model_name
+            
+            if preferred_path.exists():
+                self.model_path = preferred_path
+            elif fallback_path.exists():
+                self.model_path = fallback_path
+            else:
+                self.model_path = preferred_path
+            
+        self.model_name = str(self.model_path)
         self.default_conf = default_conf
         self.model = None
         self._is_loaded = False
+        
+        # Verify file exists on instantiation and preload it
+        self._validate_model_file()
+        self.load_model()
+
+    def _validate_model_file(self):
+        if not self.model_path.exists():
+            err_msg = f"CRITICAL: YOLO model file missing. Expected absolute path: {self.model_path}"
+            logger.error(err_msg)
+            raise FileNotFoundError(err_msg)
+        if not self.model_path.is_file():
+            err_msg = f"CRITICAL: YOLO model path exists but is not a valid file: {self.model_path}"
+            logger.error(err_msg)
+            raise FileNotFoundError(err_msg)
 
     def load_model(self):
         if self._is_loaded and self.model is not None:
             return
+            
+        self._validate_model_file()
         try:
             from ultralytics import YOLO
-            logger.info(f"Loading YOLO model '{self.model_name}'...")
-            self.model = YOLO(self.model_name)
+            logger.info(f"Loading YOLO model from verified path: '{self.model_path}'...")
+            self.model = YOLO(str(self.model_path))
             self._is_loaded = True
-            logger.info("YOLO model loaded successfully.")
+            logger.info("YOLO model loaded and initialized successfully.")
         except Exception as e:
-            logger.error(f"Failed to load YOLO model: {e}")
+            logger.error(f"Failed to load YOLO model from '{self.model_path}': {e}")
             raise RuntimeError(f"YOLO initialization error: {e}")
 
     # COCO coarse class mapping (person, vehicle, animal)
@@ -379,7 +414,11 @@ class YoloDetector:
             "tracks": tracks,
             "fps": fps_approx,
             "total_frames_processed": len(frames_with_indices),
-            "source": "live_frames"
+            "source": "live_frames",
+            "frames_analyzed": len(frames_with_indices),
+            "elapsed_sec": 0.0,
+            "detections_count": len(all_detections),
+            "track_counts": track_registry.get_track_count(camera_id)
         }
 
 

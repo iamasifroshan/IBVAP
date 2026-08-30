@@ -4,8 +4,10 @@ class Settings:
     PROJECT_NAME: str = "IBVAP Backend"
     VERSION: str = "1.0.0-SIH"
     API_V1_STR: str = "/api/v1"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./ibvap.db")
-    STORAGE_DIR: str = os.getenv("STORAGE_DIR", "./storage")
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+    _db_path = os.path.join(_base_dir, 'ibvap.db').replace('\\', '/')
+    DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
+    STORAGE_DIR: str = os.getenv("STORAGE_DIR", os.path.normpath(os.path.join(_base_dir, "storage")))
     
     # SmartAlert Configurations
     SMART_ALERT_MIN_CONF: float = float(os.getenv("SMART_ALERT_MIN_CONF", "0.35"))

@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Query
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import os
+import shutil
+from datetime import datetime
 
 from database.db import get_db
-from database.models import IncidentModel
+from database.models import IncidentModel, EvidenceModel
 from database.schemas import IncidentResponse, IncidentCreate, IncidentStatusUpdate
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
@@ -119,8 +122,7 @@ def update_incident_status(incident_id: str, update: IncidentStatusUpdate, db: S
 
 @router.get("/{incident_id}/evidence")
 def get_incident_evidence(incident_id: str, db: Session = Depends(get_db)):
-    import os
-    from database.models import EvidenceModel
+    # Moved lazy imports to module level
     i = db.query(IncidentModel).filter(
         (IncidentModel.incident_id == incident_id) | (IncidentModel.id == incident_id)
     ).first()
@@ -148,11 +150,6 @@ def get_incident_evidence(incident_id: str, db: Session = Depends(get_db)):
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /evidence (Webcam Evidence Upload)
 # ─────────────────────────────────────────────────────────────────────────────
-
-from fastapi import File, UploadFile, Form
-import shutil
-from datetime import datetime
-from database.models import EvidenceModel
 
 evidence_router = APIRouter(prefix="/evidence", tags=["Evidence"])
 

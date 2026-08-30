@@ -30,6 +30,7 @@ class CameraBase(BaseModel):
     last_activity: str = "Just now"
     night_vision_mode: bool = False
     dehaze_enabled: bool = False
+    auto_start_inference: bool = False
 
 class CameraCreate(BaseModel):
     id: Optional[str] = None
@@ -51,6 +52,7 @@ class CameraCreate(BaseModel):
     last_activity: str = "Just now"
     night_vision_mode: bool = False
     dehaze_enabled: bool = False
+    auto_start_inference: bool = False
 
 class CameraResponse(CameraBase):
     id: str
@@ -70,6 +72,7 @@ class CameraResponse(CameraBase):
     lastActivity: Optional[str] = None
     nightVisionMode: Optional[bool] = None
     dehazeEnabled: Optional[bool] = None
+    autoStartInference: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -132,6 +135,10 @@ class ZoneBase(BaseModel):
     min_threat_threshold: int = 60
     loitering_limit_sec: int = 15
     enabled: bool = True
+    human_detection: bool = True
+    vehicle_detection: bool = False
+    animal_detection: bool = False
+    person_threshold: int = 1
 
 class ZoneCreate(ZoneBase):
     pass

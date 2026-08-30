@@ -27,6 +27,7 @@ class CameraModel(Base):
     last_activity = Column(String, default="Just now")
     night_vision_mode = Column(Boolean, default=False)
     dehaze_enabled = Column(Boolean, default=False)
+    auto_start_inference = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class VideoModel(Base):
@@ -98,6 +99,10 @@ class ZoneModel(Base):
     min_threat_threshold = Column(Integer, default=60)
     loitering_limit_sec = Column(Integer, default=15)
     enabled = Column(Boolean, default=True)
+    human_detection = Column(Boolean, default=True)
+    vehicle_detection = Column(Boolean, default=False)
+    animal_detection = Column(Boolean, default=False)
+    person_threshold = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class IncidentModel(Base):

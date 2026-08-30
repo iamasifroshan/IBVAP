@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import settings
-from database.db import engine, Base, SessionLocal
+from database.db import engine, Base, SessionLocal, run_migrations
 from database.models import CameraModel, ZoneModel, TrackModel
 
 from api.cameras import router as cameras_router
@@ -18,6 +18,9 @@ from api.streams import router as streams_router
 from api.videos import router as videos_router
 from api.detections import router as detections_router
 from api.edge import router as edge_router
+from api.search import router as search_router
+from api.analytics import router as analytics_router
+from api.training import router as training_router
 from api.analytics import router as analytics_router
 from api.search import router as search_router
 from api.training import router as training_router
@@ -26,17 +29,22 @@ from api.ws import router as ws_router
 # Initial DB Seeder: seed sample cameras
 def seed_db():
     db = SessionLocal()
+    from video.stream_manager import stream_manager
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(base_dir)
-        
-        video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp(1).mp4")
-        video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp(1).mp4")
-        video_3 = os.path.join(base_dir, "storage", "videos", "12522257-hd_1920_1080_24fps(1).mp4")
-        video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps(1).mp4")
+        if db.query(CameraModel).count() > 0:
+            # Skip seeding, database is already populated
+            pass
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(base_dir)
+            
+            video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp(1).mp4")
+            video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp(1).mp4")
+            video_3 = os.path.join(base_dir, "storage", "videos", "12522257-hd_1920_1080_24fps(1).mp4")
+            video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps(1).mp4")
 
-        # Create or update cameras
-        cameras_data = [
+            # Create or update cameras
+            cameras_data = [
             {
                 "camera_id": "BORDER-CAM-07",
                 "name": "BORDER-CAM-07",
@@ -127,13 +135,40 @@ def seed_db():
             }
         ]
 
-        for cam_d in cameras_data:
-            existing = db.query(CameraModel).filter(CameraModel.camera_id == cam_d["camera_id"]).first()
-            if existing:
-                for k, v in cam_d.items():
-                    setattr(existing, k, v)
-            else:
+        
+
+            for cam_d in cameras_data:
+                verify = stream_manager.verify_camera_source(cam_d["source_url"], cam_d["source_type"])
+                cam_d["status"] = verify["status"]
+                cam_d["health_score"] = verify["health_score"]
+                if verify.get("resolution") and verify["resolution"] not in ("N/A", "Unknown", "0x0"):
+                    cam_d["resolution"] = verify["resolution"]
+                if verify.get("fps") and verify["fps"] > 0:
+                    cam_d["fps"] = int(verify["fps"])
                 db.add(CameraModel(**cam_d))
+            db.commit()
+
+        # Verify and recover status for ALL cameras in the database on startup
+
+        all_cameras = db.query(CameraModel).all()
+        for cam in all_cameras:
+            # Test source, resolve relative/HTTP/absolute path, verify health and connection
+            verify = stream_manager.verify_camera_source(cam.source_url, cam.source_type)
+            cam.status = verify["status"]
+            cam.health_score = verify["health_score"]
+            if verify.get("resolution") and verify["resolution"] not in ("N/A", "Unknown", "0x0"):
+                cam.resolution = verify["resolution"]
+            if verify.get("fps") and verify["fps"] > 0:
+                cam.fps = int(verify["fps"])
+            
+            # Map status transitions and last activity
+            status_upper = verify["status"].upper()
+            if status_upper == "ONLINE":
+                cam.last_activity = f"Source verified online — {verify['resolution']} @ {verify['fps']:.0f}fps"
+            elif status_upper == "DEGRADED":
+                cam.last_activity = "Source degraded — limited frame response"
+            else:
+                cam.last_activity = f"Offline: {verify.get('error', 'Stream unavailable')[:100]}"
         db.commit()
 
         if db.query(ZoneModel).count() == 0:
@@ -161,11 +196,43 @@ def seed_db():
     finally:
         db.close()
 
+is_backend_ready = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB tables automatically on startup
-    Base.metadata.create_all(bind=engine)
-    seed_db()
+    global is_backend_ready
+    print("[STARTUP] Backend starting")
+    print(f"[STARTUP] Database path: {settings.DATABASE_URL}")
+    
+    try:
+        # Test DB connectivity
+        with engine.connect() as conn:
+            pass
+        print("[STARTUP] Database connected")
+        
+        # Initialize DB tables automatically on startup
+        Base.metadata.create_all(bind=engine)
+        run_migrations()
+        seed_db()
+        
+        # Output counts
+        db = SessionLocal()
+        from database.models import IncidentModel, EvidenceModel
+        cam_count = db.query(CameraModel).count()
+        inc_count = db.query(IncidentModel).count()
+        ev_count = db.query(EvidenceModel).count()
+        db.close()
+        
+        print(f"[STARTUP] Cameras found: {cam_count}")
+        print(f"[STARTUP] Incidents found: {inc_count}")
+        print(f"[STARTUP] Evidence found: {ev_count}")
+        print("[STARTUP] Storage verified")
+        print("[STARTUP] API ready")
+        
+        is_backend_ready = True
+    except Exception as e:
+        print(f"[STARTUP] Backend initialization failed: {e}")
+        
     yield
 
 app = FastAPI(
@@ -197,9 +264,24 @@ app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="video_storage")
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 def health_check():
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            pass
+    except Exception:
+        db_status = "disconnected"
+        
+    status = "healthy" if is_backend_ready and db_status == "connected" else "initializing"
+    if not is_backend_ready:
+        status = "initializing"
+        
     return {
-        "status": "healthy",
-        "service": "IBVAP Backend"
+        "status": status,
+        "service": "IBVAP Backend",
+        "database": db_status,
+        "database_path": settings.DATABASE_URL,
+        "storage": "verified" if is_backend_ready else "unknown",
+        "ready": is_backend_ready
     }
 
 # Mount Routers under both /api/v1 and /api for full compatibility
@@ -212,6 +294,9 @@ for prefix in ["/api/v1", "/api"]:
     app.include_router(videos_router, prefix=prefix)
     app.include_router(detections_router, prefix=prefix)
     app.include_router(edge_router, prefix=prefix)
+    app.include_router(search_router, prefix=prefix)
+    app.include_router(analytics_router, prefix=prefix)
+    app.include_router(training_router, prefix=prefix)
     app.include_router(analytics_router, prefix=prefix)
     app.include_router(search_router, prefix=prefix)
     app.include_router(training_router, prefix=prefix)

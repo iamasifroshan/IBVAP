@@ -18,11 +18,12 @@ export const LiveSurveillancePage: React.FC = () => {
     setActiveCameraId,
     environment,
     addIncident,
-    metrics
+    metrics,
+    updateCamera
   } = useApp();
 
   // Mode & Playback states
-  const [feedSource, setFeedSource] = useState<'SIMULATED' | 'WEBCAM' | 'UPLOADED'>('WEBCAM');
+  const [feedSource, setFeedSource] = useState<'SIMULATED' | 'WEBCAM' | 'UPLOADED'>('SIMULATED');
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isDetecting, setIsDetecting] = useState<boolean>(false);
@@ -30,6 +31,7 @@ export const LiveSurveillancePage: React.FC = () => {
 
   // Webcam states
   const [webcamActive, setWebcamActive] = useState<boolean>(false);
+  const [webcamConnecting, setWebcamConnecting] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [webcamFPS, setWebcamFPS] = useState<number>(0);
   const [inferenceLatency, setInferenceLatency] = useState<number>(0);
@@ -86,10 +88,13 @@ export const LiveSurveillancePage: React.FC = () => {
       webcamStreamRef.current = null;
     }
     setWebcamActive(false);
+    setWebcamConnecting(false);
+    setIsDetecting(false);
     setCameraError(null);
+    setWebcamFPS(0);
+    setPersonCount(0);
     setRealDetections([]);
     setRealTracks([]);
-    setPersonCount(0);
     setWebcamStatus('NO HUMAN DETECTED');
     isAlertingRef.current = false;
 
@@ -102,44 +107,133 @@ export const LiveSurveillancePage: React.FC = () => {
   }, []);
 
   // ── Start Browser Webcam ──────────────────────────────────────────────────
-  const startWebcam = useCallback(() => {
-    stopWebcam();
+  // Stops any existing stream first, then requests a fresh one.
+  // Returns true if the stream was successfully started.
+  const startWebcam = useCallback(async (): Promise<boolean> => {
+    // Stop any existing interval and stream before requesting a new one
+    // (prevents duplicate streams / duplicate inference loops)
+    if (inferenceIntervalRef.current) {
+      clearInterval(inferenceIntervalRef.current);
+      inferenceIntervalRef.current = null;
+    }
+    if (webcamStreamRef.current) {
+      webcamStreamRef.current.getTracks().forEach(t => t.stop());
+      webcamStreamRef.current = null;
+    }
+    setWebcamActive(false);
+    setWebcamConnecting(true);
     setCameraError(null);
+    // Reset stale values immediately so the UI doesn't show old data while connecting
+    setWebcamFPS(0);
+    setPersonCount(0);
+    setWebcamStatus('NO HUMAN DETECTED');
 
-    navigator.mediaDevices?.getUserMedia({ video: { width: 1280, height: 720 }, audio: false })
-      .then((stream) => {
-        webcamStreamRef.current = stream;
-        setWebcamActive(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.src = '';
-          videoRef.current.play().catch(e => console.warn("Failed to autoplay webcam:", e));
-        }
-      })
-      .catch((err) => {
-        console.error('Webcam access failed:', err);
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setCameraError('Camera access denied. Enable webcam permission to use Live Surveillance.');
-        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          setCameraError('No webcam detected.');
-        } else {
-          setCameraError(`Camera access error: ${err.message || 'Unknown error'}`);
-        }
-        setWebcamActive(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      webcamStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.src = '';
+        videoRef.current.play().catch(e => console.warn("Failed to autoplay webcam:", e));
+      }
+      setWebcamConnecting(false);
+      setWebcamActive(true);
+      return true;
+    } catch (err: any) {
+      console.error('Webcam access failed:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setCameraError('Camera access denied. Enable webcam permission to use Live Surveillance.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setCameraError('No webcam detected.');
+      } else {
+        setCameraError(`Camera access error: ${err.message || 'Unknown error'}`);
+      }
+      setWebcamConnecting(false);
+      setWebcamActive(false);
+      return false;
+    }
+  }, []);
+
+  // ── Sync feed source with selected camera protocol ──────────────────────
+  useEffect(() => {
+    if (activeCamera) {
+      if (activeCamera.protocol === 'WEBCAM') {
+        setFeedSource('WEBCAM');
+      } else {
+        setFeedSource('SIMULATED');
+      }
+    }
+  }, [activeCameraId, activeCamera]);
+
+  // ── Handle Source Switch & Persistence ──────────────────────────────────────
+  const handleSourceChange = async (val: 'SIMULATED' | 'WEBCAM') => {
+    setFeedSource(val);
+    if (!activeCamera) return;
+    try {
+      const type = val === 'WEBCAM' ? 'WEBCAM' : 'SIMULATED_FILE';
+      const url = activeCamera.streamUrl || '';
+      const res = await ibvapApi.updateCameraSource(activeCamera.id, url, type);
+      const verify = res.source_verification || {};
+      
+      const statusLower = res.status?.toLowerCase();
+      updateCamera(activeCamera.id, {
+        protocol: type as any,
+        streamUrl: url,
+        status: (statusLower || activeCamera.status) as any,
+        healthScore: res.healthScore || res.health_score || activeCamera.healthScore,
       });
-  }, [stopWebcam]);
+    } catch (err) {
+      console.warn("Failed to persist source choice in DB:", err);
+    }
+  };
 
   // ── Monitor feed source and camera selector updates ────────────────────────
+  // This effect fires when the user switches camera/source, or when the
+  // component mounts (page navigation / browser refresh).
   useEffect(() => {
+    setRealDetections([]);
+    setRealTracks([]);
+    setPersonCount(0);
+    setWebcamStatus('NO HUMAN DETECTED');
+
     if (feedSource === 'WEBCAM') {
-      startWebcam();
+      // Attempt to connect the webcam automatically.
+      // If the user previously started inference (activeCamera.autoStartInference === true),
+      // restart the inference loop once the stream is confirmed active.
+      startWebcam().then(success => {
+        if (!success) return; // stream failed — error already shown
+        if (activeCamera.autoStartInference) {
+          // Guard: only start one loop
+          if (!inferenceIntervalRef.current) {
+            setIsDetecting(true);
+            inferenceIntervalRef.current = setInterval(() => {
+              if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+            }, 180);
+          }
+        }
+      });
     } else {
+      // Switching to simulated/uploaded — stop any active webcam
       stopWebcam();
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
     }
-    return () => stopWebcam();
+
+    // Cleanup on unmount or before next effect run
+    return () => {
+      if (inferenceIntervalRef.current) {
+        clearInterval(inferenceIntervalRef.current);
+        inferenceIntervalRef.current = null;
+      }
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach(t => t.stop());
+        webcamStreamRef.current = null;
+      }
+      setWebcamActive(false);
+      setWebcamConnecting(false);
+      setIsDetecting(false);
+    };
   }, [feedSource, activeCameraId, startWebcam, stopWebcam]);
 
   // ── Capture composite screenshot & Upload evidence ─────────────────────────
@@ -295,13 +389,8 @@ export const LiveSurveillancePage: React.FC = () => {
         setLastDetectionTime(new Date().toLocaleTimeString());
 
         // Decision logic
-        if (count === 0) {
-          setWebcamStatus('NO HUMAN DETECTED');
-          isAlertingRef.current = false;
-        } else if (count === 1) {
-          setWebcamStatus('NORMAL');
-          isAlertingRef.current = false;
-        } else {
+        const hasCreatedIncidents = (res.incidents_created_count || 0) > 0;
+        if (hasCreatedIncidents) {
           setWebcamStatus('ALERT');
           // Cooldown state machine for evidence screenshot
           const now = Date.now();
@@ -312,6 +401,12 @@ export const LiveSurveillancePage: React.FC = () => {
             drawDetections(dets);
             setTimeout(() => captureAndUploadEvidence(count, dets), 100);
           }
+        } else if (count === 0) {
+          setWebcamStatus('NO HUMAN DETECTED');
+          isAlertingRef.current = false;
+        } else {
+          setWebcamStatus('NORMAL');
+          isAlertingRef.current = false;
         }
 
         // Draw overlay boxes
@@ -319,18 +414,34 @@ export const LiveSurveillancePage: React.FC = () => {
 
       } catch (err) {
         console.warn('Frame inference failed:', err);
+        setWebcamFPS(0);
       }
     }, 'image/jpeg');
   }, [webcamActive, activeCamera, drawDetections, captureAndUploadEvidence]);
 
+  // ── Fix Stale Closure for runFrameInference ───────────────────────────────
+  const runFrameInferenceRef = useRef(runFrameInference);
+  useEffect(() => {
+    runFrameInferenceRef.current = runFrameInference;
+  }, [runFrameInference]);
+
   // ── Toggle AI Inference loop ──────────────────────────────────────────────
-  const toggleInference = () => {
+  const toggleInference = async () => {
     if (isDetecting) {
+      // User is stopping inference — clear intent flag in the backend database
+      try {
+        await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, false);
+        updateCamera(activeCamera.id, { autoStartInference: false });
+      } catch (err) {
+        console.warn("Failed to persist auto-start preference in DB:", err);
+      }
+
       if (inferenceIntervalRef.current) {
         clearInterval(inferenceIntervalRef.current);
         inferenceIntervalRef.current = null;
       }
       setIsDetecting(false);
+      setWebcamFPS(0);
       // Clear detections overlay
       const canvas = canvasRef.current;
       if (canvas) {
@@ -345,24 +456,92 @@ export const LiveSurveillancePage: React.FC = () => {
       if (feedSource !== 'WEBCAM') {
         runRealYoloDetection();
       } else {
-        if (!webcamActive) {
-          startWebcam();
+        // Record intent: if user explicitly starts inference, auto-resume it
+        // on next page load / refresh as long as source remains WEBCAM.
+        try {
+          await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, true);
+          updateCamera(activeCamera.id, { autoStartInference: true });
+        } catch (err) {
+          console.warn("Failed to persist auto-start preference in DB:", err);
         }
-        setIsDetecting(true);
-        // Start loop every 180ms (~5.5 fps) to controlled load on CPU
-        inferenceIntervalRef.current = setInterval(runFrameInference, 180);
+
+        const startLoop = () => {
+          // Guard: never run two loops simultaneously
+          if (inferenceIntervalRef.current) {
+            clearInterval(inferenceIntervalRef.current);
+          }
+          setIsDetecting(true);
+          // Interval ~180 ms ≈ 5.5 frames/s to keep CPU load controlled
+          inferenceIntervalRef.current = setInterval(() => {
+            if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+          }, 180);
+        };
+
+        if (!webcamActive) {
+          startWebcam().then(success => {
+            if (success) startLoop();
+          });
+        } else {
+          startLoop();
+        }
       }
     }
   };
 
-  // ── Cleanup interval on unmount ───────────────────────────────────────────
+
+  // ── Full cleanup on component unmount ────────────────────────────────────
+  // The feedSource useEffect already has a cleanup return, but this
+  // unconditional cleanup covers any edge-case unmount path.
   useEffect(() => {
     return () => {
       if (inferenceIntervalRef.current) {
         clearInterval(inferenceIntervalRef.current);
+        inferenceIntervalRef.current = null;
+      }
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach(t => t.stop());
+        webcamStreamRef.current = null;
       }
     };
   }, []);
+
+  // ── Animation Loop for Simulated/Uploaded Video Overlays ──────────────────
+  useEffect(() => {
+    if (feedSource === 'WEBCAM') return;
+    
+    let animFrame: number;
+    const loop = () => {
+      const video = videoRef.current;
+      if (video && realDetections.length > 0) {
+        const currentFrame = Math.round(video.currentTime * (activeCamera.fps || 30));
+        
+        let closestFrameIndex: number | null = null;
+        let minDiff = Infinity;
+        
+        realDetections.forEach((d) => {
+          const diff = Math.abs(d.frame_index - currentFrame);
+          if (diff < minDiff && diff <= 10) {
+            minDiff = diff;
+            closestFrameIndex = d.frame_index;
+          }
+        });
+        
+        const frameDets = closestFrameIndex !== null 
+          ? realDetections.filter(d => d.frame_index === closestFrameIndex)
+          : [];
+          
+        drawDetections(frameDets);
+        setPersonCount(frameDets.length);
+
+        const statusVal = frameDets.length === 0 ? 'NO HUMAN DETECTED' : (frameDets.length === 1 ? 'NORMAL' : 'ALERT');
+        setWebcamStatus(statusVal);
+      }
+      animFrame = requestAnimationFrame(loop);
+    };
+    
+    animFrame = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animFrame);
+  }, [feedSource, realDetections, activeCamera.fps, drawDetections]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -403,37 +582,9 @@ export const LiveSurveillancePage: React.FC = () => {
         setRealTracks(data.tracks || []);
 
         const incCount = data.incidents_created_count || 0;
-        if (incCount > 0 && data.incidents_created) {
-          data.incidents_created.forEach((inc: any) => {
-            addIncident({
-              id: inc.id || inc.incident_id,
-              timestamp: inc.timestamp || new Date().toLocaleString(),
-              sector: activeCamera.sector || 'Sector B',
-              cameraName: activeCamera.name,
-              cameraId: detectId,
-              outpost: activeCamera.outpost || 'Border Outpost North',
-              objectType: (inc.object_type === 'person' ? 'human' : inc.object_type) as any,
-              persistentId: inc.track_id,
-              threatScore: inc.threat_score,
-              severity: (inc.threat_level || 'critical') as any,
-              explainableReason: inc.explainable_reason,
-              environmentalCondition: 'normal',
-              aiReliability: 92,
-              visibilityScore: 90,
-              status: 'active',
-              snapshotUrl: '',
-              zoneName: inc.zone_name,
-              loiteringDurationSec: 0,
-              speedKmh: 4.2,
-              direction: 'Inward Perimeter',
-              smartAlertConfirmed: true,
-              syncedToCloud: false,
-              threatFactors: [
-                { category: 'PERIMETER_BREACH', scoreContribution: 50, description: `Target ${inc.track_id} crossed virtual fence in ${inc.zone_name}` }
-              ]
-            });
-          });
-        }
+        // Backend successfully evaluates rules and creates incidents directly in the database.
+        // The frontend will automatically load the canonical database record on its next poll interval,
+        // so we DO NOT call a frontend fake `addIncident` here.
       } else {
         setRealDetections([]);
         setRealTracks([]);
@@ -468,18 +619,18 @@ export const LiveSurveillancePage: React.FC = () => {
             <select
               className="bg-white border border-[var(--border-color)] text-[var(--text-primary)] rounded px-3 py-1.5 focus:outline-none focus:border-[#1F5F8B] shadow-sm font-semibold text-xs"
               value={feedSource}
-              onChange={(e) => setFeedSource(e.target.value as any)}
+              onChange={(e) => handleSourceChange(e.target.value as any)}
             >
               <option value="WEBCAM">Real Live Webcam</option>
               <option value="SIMULATED">Simulated File Stream</option>
             </select>
 
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              activeCamera.status === 'online' ? 'bg-[#10B981]/10 text-[#10B981]' :
-              activeCamera.status === 'degraded' ? 'bg-[#F59E0B]/10 text-[#F59E0B]' : 'bg-slate-100 text-slate-500'
-            }`}>
-              {activeCamera.status.toUpperCase()}
-            </span>
+             <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+               activeCamera.status?.toUpperCase() === 'ONLINE' ? 'bg-[#10B981]/10 text-[#10B981]' :
+               activeCamera.status?.toUpperCase() === 'DEGRADED' ? 'bg-[#F59E0B]/10 text-[#F59E0B]' : 'bg-slate-100 text-slate-500'
+             }`}>
+               {activeCamera.status?.toUpperCase()}
+             </span>
           </div>
         </div>
 
@@ -536,7 +687,7 @@ export const LiveSurveillancePage: React.FC = () => {
               <span className="px-3 py-1.5 bg-black/70 backdrop-blur-sm text-white text-xs font-semibold rounded shadow-sm flex items-center gap-2 border border-white/10">
                 <Radio className="w-3.5 h-3.5 text-[#D92D20] animate-pulse" /> LIVE STREAM
               </span>
-              {feedSource === 'WEBCAM' && (
+              {(feedSource === 'WEBCAM' || realDetections.length > 0) && (
                 <span className={`px-3 py-1.5 rounded text-white text-xs font-bold ${
                   webcamStatus === 'ALERT' ? 'bg-[#D92D20]/90 border border-red-500/30' :
                   webcamStatus === 'NORMAL' ? 'bg-[#10B981]/90 border border-emerald-500/30' :
@@ -553,11 +704,16 @@ export const LiveSurveillancePage: React.FC = () => {
                 {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
               </button>
               <div className="flex gap-6 font-semibold font-mono text-xs">
-                {feedSource === 'WEBCAM' && webcamActive && (
+                {feedSource === 'WEBCAM' && webcamConnecting && (
+                  <span className="text-yellow-400 animate-pulse">CONNECTING...</span>
+                )}
+                {feedSource === 'WEBCAM' && webcamActive && !webcamConnecting && (
                   <>
-                    <span className="text-[#93C5FD]">WEBCAM ACTIVE</span>
-                    <span className="text-emerald-400">{webcamFPS} FPS</span>
-                    <span className="text-slate-300">LATENCY: {inferenceLatency}ms</span>
+                    <span className="text-[#93C5FD]">WEBCAM ONLINE</span>
+                    <span className={webcamFPS > 0 ? 'text-emerald-400' : 'text-slate-400'}>
+                      {isDetecting ? `${webcamFPS} FPS` : 'IDLE'}
+                    </span>
+                    {isDetecting && <span className="text-slate-300">LATENCY: {inferenceLatency}ms</span>}
                   </>
                 )}
                 {feedSource !== 'WEBCAM' && (
@@ -571,7 +727,7 @@ export const LiveSurveillancePage: React.FC = () => {
           </div>
 
           {/* Real-time Decision status bar */}
-          {feedSource === 'WEBCAM' && (
+          {(feedSource === 'WEBCAM' || realDetections.length > 0) && (
             <div className={`p-[16px] rounded-lg border flex justify-between items-center text-sm font-semibold transition-all duration-300 ${
               webcamStatus === 'ALERT' ? 'bg-red-50 border-red-200 text-[#D92D20]' :
               webcamStatus === 'NORMAL' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :

@@ -98,6 +98,10 @@ export const EdgeGuardPage: React.FC = () => {
     setIsCentralConnected(status !== 'offline');
     try {
       await ibvapApi.toggleConnectivity(status !== 'offline');
+      if (status === 'online') {
+        // Automatically sync queued records on transition to online
+        setTimeout(() => handleRealSyncExecution(), 100);
+      }
     } catch {
       /* fallback */
     }

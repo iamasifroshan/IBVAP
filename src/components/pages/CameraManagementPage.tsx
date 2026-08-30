@@ -7,13 +7,13 @@ import { ibvapApi } from '../../services/apiClient';
 import { Card } from '../common/Card';
 import { Badge } from '../common/Badge';
 
-type SourceType = 'MP4_FILE' | 'WEBCAM' | 'RTSP';
+type SourceType = 'SIMULATED_FILE' | 'WEBCAM' | 'RTSP';
 
 export const CameraManagementPage: React.FC = () => {
   const { cameras, updateCamera } = useApp();
   
   const [sourceConfigCamId, setSourceConfigCamId] = useState<string | null>(null);
-  const [sourceType, setSourceType] = useState<SourceType>('MP4_FILE');
+  const [sourceType, setSourceType] = useState<SourceType>('SIMULATED_FILE');
   const [sourceUrl, setSourceUrl] = useState<string>('');
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
@@ -25,7 +25,7 @@ export const CameraManagementPage: React.FC = () => {
     if (!cam) return;
     setSourceConfigCamId(camId);
     const prot = cam.protocol;
-    setSourceType((prot === 'MP4_FILE' as any || !prot) ? 'MP4_FILE' : prot as SourceType);
+    setSourceType((prot === 'SIMULATED_FILE' || prot === 'MP4_FILE' as any || !prot) ? 'SIMULATED_FILE' : prot as SourceType);
     setSourceUrl(cam.streamUrl || '');
     setTestResult(null);
   };
@@ -35,12 +35,31 @@ export const CameraManagementPage: React.FC = () => {
     setTestLoading(true);
     setTestResult(null);
     try {
-      const res = await ibvapApi.testCameraSource(sourceConfigCamId);
-      setTestResult(res);
+      // First save/update the camera source in the database, which triggers verification
+      const res = await ibvapApi.updateCameraSource(sourceConfigCamId, sourceUrl, sourceType);
+      const verify = res.source_verification || {};
+      
+      const isOnline = res.status?.toUpperCase() === 'ONLINE' || verify.status?.toUpperCase() === 'ONLINE';
+      
+      setTestResult({
+        status: isOnline ? 'online' : 'offline',
+        health_score: res.healthScore || res.health_score || 0,
+        resolution: verify.resolution || res.resolution,
+        fps: res.fps,
+        error: verify.error
+      });
+      
+      const statusLower = res.status?.toLowerCase();
       updateCamera(sourceConfigCamId, {
-        status: res.status,
-        healthScore: res.health_score,
-        lastActivity: res.status === 'online' ? `Verified ${res.resolution} @ ${res.fps?.toFixed(0)}fps` : `Offline: ${res.error?.slice(0, 60)}`,
+        status: statusLower as any,
+        healthScore: res.healthScore || res.health_score,
+        protocol: res.protocol === 'MP4_FILE' ? 'SIMULATED_FILE' : res.protocol,
+        streamUrl: res.streamUrl,
+        fps: res.fps,
+        resolution: res.resolution,
+        lastActivity: statusLower === 'online' 
+          ? `Verified ${res.resolution} @ ${res.fps?.toFixed(0)}fps` 
+          : `Offline: ${verify.error?.slice(0, 60) || 'Stream unavailable'}`,
       });
     } catch (err: any) {
       setTestResult({ status: 'error', health_score: 0, error: err?.message || 'Request failed' });
@@ -108,7 +127,7 @@ export const CameraManagementPage: React.FC = () => {
                     onChange={e => setSourceType(e.target.value as SourceType)}
                     className="w-full bg-slate-50 border border-slate-300 rounded-md p-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#005EA8]/20 focus:border-[#005EA8]"
                   >
-                    <option value="MP4_FILE">MP4 File (Absolute Path)</option>
+                    <option value="SIMULATED_FILE">MP4 File / Simulated File</option>
                     <option value="WEBCAM">Webcam (Index 0/1)</option>
                     <option value="RTSP">RTSP Stream URL</option>
                   </select>

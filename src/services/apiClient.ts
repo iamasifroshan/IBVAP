@@ -46,35 +46,50 @@ async function tryLive<T>(
   try {
     return await fetcher();
   } catch (err) {
-    console.warn(
-      `[IBVAP] FastAPI unreachable for "${label}" — serving EdgeGuard local data.`,
+    console.error(
+      `[IBVAP] FastAPI unreachable for "${label}". Propagating error to UI.`,
       err
     );
-    return mockValue;
+    throw err;
   }
 }
 
 // ─────────────────────────────────────────────────────────────
 // Public API surface
 // ─────────────────────────────────────────────────────────────
+// Helper to normalize camera properties for UI consistency
+function normalizeCamera(cam: any): Camera {
+  if (!cam) return cam;
+  return {
+    ...cam,
+    status: (cam.status?.toLowerCase() || 'offline') as any,
+    protocol: (cam.protocol === 'MP4_FILE' ? 'SIMULATED_FILE' : (cam.protocol || 'SIMULATED_FILE')) as any,
+    healthScore: typeof cam.healthScore === 'number' ? cam.healthScore : (cam.health_score || 0),
+    streamUrl: cam.streamUrl || cam.stream_url || cam.source_url || '',
+    autoStartInference: cam.autoStartInference ?? cam.auto_start_inference ?? false,
+  };
+}
+
 export const ibvapApi = {
 
   // ── GET /api/cameras ──────────────────────────────────────
-  getCameras(): Promise<Camera[]> {
-    return tryLive(
+  async getCameras(): Promise<Camera[]> {
+    const list = await tryLive(
       () => apiFetch<Camera[]>(API_ROUTES.cameras),
       MOCK_CAMERAS,
       'GET /cameras'
     );
+    return list.map(normalizeCamera);
   },
 
   // ── GET /api/cameras/:id ──────────────────────────────────
-  getCameraById(id: string): Promise<Camera | undefined> {
-    return tryLive(
+  async getCameraById(id: string): Promise<Camera | undefined> {
+    const cam = await tryLive(
       () => apiFetch<Camera>(API_ROUTES.cameraById(id)),
       MOCK_CAMERAS.find(c => c.id === id),
       `GET /cameras/${id}`
     );
+    return cam ? normalizeCamera(cam) : undefined;
   },
 
   // ── POST /api/cameras ─────────────────────────────────────
@@ -100,9 +115,10 @@ export const ibvapApi = {
       lastActivity: 'Just now',
       nightVisionMode: false,
       dehazeEnabled:   false,
+      autoStartInference: false,
     };
 
-    return tryLive(
+    const res = await tryLive(
       () => apiFetch<Camera>(API_ROUTES.cameras, {
         method: 'POST',
         body: JSON.stringify(newCam),
@@ -110,6 +126,7 @@ export const ibvapApi = {
       newCam,
       'POST /cameras'
     );
+    return normalizeCamera(res);
   },
 
   // ── POST /api/cameras/:id/test-source ─────────────────────
@@ -127,7 +144,11 @@ export const ibvapApi = {
         error: 'Backend unavailable in mock mode'
       };
     }
-    return apiFetch(`${API_ROUTES.cameras}/${cameraId}/test-source`, { method: 'POST' });
+    const res = await apiFetch<any>(`${API_ROUTES.cameras}/${cameraId}/test-source`, { method: 'POST' });
+    if (res) {
+      res.status = res.status?.toLowerCase();
+    }
+    return res;
   },
 
   // ── PATCH /api/cameras/:id/source ─────────────────────────
@@ -140,7 +161,15 @@ export const ibvapApi = {
     }
     const params = new URLSearchParams({ source_url: sourceUrl });
     if (sourceType) params.set('source_type', sourceType);
-    return apiFetch(`${API_ROUTES.cameras}/${cameraId}/source?${params.toString()}`, { method: 'PATCH' });
+    const res = await apiFetch<any>(`${API_ROUTES.cameras}/${cameraId}/source?${params.toString()}`, { method: 'PATCH' });
+    if (res) {
+      if (res.status) res.status = res.status.toLowerCase();
+      if (res.protocol) res.protocol = res.protocol === 'MP4_FILE' ? 'SIMULATED_FILE' : res.protocol;
+      if (res.source_verification && res.source_verification.status) {
+        res.source_verification.status = res.source_verification.status.toLowerCase();
+      }
+    }
+    return res;
   },
 
   // ── POST /api/videos/upload ────────────────────────────────
@@ -328,6 +357,35 @@ export const ibvapApi = {
     );
   },
 
+  // ── PUT /api/zones/:id ────────────────────────────────────
+  async updateZone(zoneId: string, zoneData: Partial<VirtualZone>): Promise<VirtualZone> {
+    const bodyData = {
+      name: zoneData.name,
+      camera_id: (zoneData as any).cameraId || (zoneData as any).camera_id || 'BORDER-CAM-07',
+      sector: zoneData.sector,
+      zone_type: zoneData.type || (zoneData as any).zone_type || 'restricted_fence',
+      polygon_coordinates: zoneData.points || (zoneData as any).polygon_coordinates || [],
+      severity: (zoneData as any).alertSeverity || (zoneData as any).severity || 'high',
+      sensitivity: zoneData.sensitivity ?? 90,
+      min_threat_threshold: (zoneData as any).minThreatThreshold || (zoneData as any).min_threat_threshold || 60,
+      loitering_limit_sec: zoneData.loiteringLimitSec || (zoneData as any).loitering_limit_sec || 15,
+      enabled: zoneData.active !== undefined ? zoneData.active : true,
+      human_detection: (zoneData as any).humanDetection !== undefined ? (zoneData as any).humanDetection : true,
+      vehicle_detection: (zoneData as any).vehicleDetection !== undefined ? (zoneData as any).vehicleDetection : false,
+      animal_detection: (zoneData as any).animalDetection !== undefined ? (zoneData as any).animalDetection : false,
+      person_threshold: (zoneData as any).personThreshold !== undefined ? (zoneData as any).personThreshold : 1,
+    };
+
+    return tryLive(
+      () => apiFetch<VirtualZone>(API_ROUTES.zoneById(zoneId), {
+        method: 'PUT',
+        body: JSON.stringify(bodyData),
+      }),
+      { ...zoneData, id: zoneId } as VirtualZone,
+      `PUT /zones/${zoneId}`
+    );
+  },
+
   // ── DELETE /api/zones/:id ─────────────────────────────────
   async deleteZone(zoneId: string): Promise<void> {
     if (USE_MOCK) return;
@@ -364,7 +422,7 @@ export const ibvapApi = {
   // ── GET /api/sync/connectivity ────────────────────────────
   getConnectivity(): Promise<{ central_connected: boolean }> {
     return tryLive(
-      () => apiFetch<{ central_connected: boolean }>('/sync/connectivity'),
+      () => apiFetch<{ central_connected: boolean }>(API_ROUTES.syncConnectivity),
       { central_connected: false },
       'GET /sync/connectivity'
     );
@@ -374,7 +432,7 @@ export const ibvapApi = {
   toggleConnectivity(connected?: boolean): Promise<{ central_connected: boolean; message: string }> {
     return tryLive(
       () => apiFetch<{ central_connected: boolean; message: string }>(
-        `/sync/toggle-connectivity${connected !== undefined ? `?connected=${connected}` : ''}`, 
+        `${API_ROUTES.syncToggleConnectivity}${connected !== undefined ? `?connected=${connected}` : ''}`, 
         { method: 'POST' }
       ),
       { central_connected: false, message: 'Connectivity toggled' },
@@ -491,6 +549,23 @@ export const ibvapApi = {
   getAllTracks(state?: string): Promise<TrackRecord[]> {
     const url = state ? `${API_ROUTES.allTracks}?state=${state}` : API_ROUTES.allTracks;
     return apiFetch<TrackRecord[]>(url);
+  },
+
+  // ── PATCH /api/cameras/:id/inference-auto-start ────────────
+  async updateCameraInferenceAutoStart(cameraId: string, autoStart: boolean): Promise<Camera> {
+    if (USE_MOCK) {
+      const mockCam = MOCK_CAMERAS.find(c => c.id === cameraId);
+      if (mockCam) {
+        mockCam.autoStartInference = autoStart;
+        return normalizeCamera(mockCam);
+      }
+      throw new Error(`Camera ${cameraId} not found`);
+    }
+
+    const res = await apiFetch<Camera>(`${API_ROUTES.cameras}/${cameraId}/inference-auto-start?auto_start=${autoStart}`, {
+      method: 'PATCH'
+    });
+    return normalizeCamera(res);
   },
 };
 

@@ -68,6 +68,8 @@ export const API_ROUTES = {
   edgeStatus:     `${API_BASE_URL}/edge/status`,
   syncStatus:     `${API_BASE_URL}/sync/status`,
   syncTrigger:    `${API_BASE_URL}/sync/trigger`,
+  syncConnectivity: `${API_BASE_URL}/sync/connectivity`,
+  syncToggleConnectivity: `${API_BASE_URL}/sync/toggle-connectivity`,
 
   // Analytics
   analytics:      `${API_BASE_URL}/analytics/summary`,

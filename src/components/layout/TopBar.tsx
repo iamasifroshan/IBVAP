@@ -29,7 +29,7 @@ export const TopBar: React.FC = () => {
           <ShieldAlert className="w-5 h-5 text-white" />
         </div>
         <div className="flex flex-col">
-          <span className="font-bold text-base tracking-wide leading-tight text-white">IBVAP</span>
+          <span className="font-bold text-base tracking-wide leading-tight text-white">IVAP</span>
           <span className="text-xs text-blue-200 whitespace-nowrap">Intelligent Border Video Analytics Platform</span>
         </div>
 

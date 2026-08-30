@@ -44,6 +44,7 @@ const LOCAL_STORAGE_KEYS = {
   SYNC_QUEUE: 'ibvap_sync_queue',
   NETWORK_STATUS: 'ibvap_network_status',
   METRICS: 'ibvap_metrics',
+  CAMERAS: 'ibvap_cameras',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -56,17 +57,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [environment, setEnvironment] = useState<EnvironmentCondition>('normal');
-  const [cameras, setCameras] = useState<Camera[]>(MOCK_CAMERAS);
+  const [cameras, setCameras] = useState<Camera[]>(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.CAMERAS);
+    if (saved) {
+      try { return JSON.parse(saved); } catch { /* fallback */ }
+    }
+    return [];
+  });
 
   const [incidents, setIncidents] = useState<Incident[]>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.INCIDENTS);
     if (saved) {
       try { return JSON.parse(saved); } catch { /* fallback */ }
     }
-    return MOCK_INCIDENTS;
+    return [];
   });
 
-  const [zones, setZones] = useState<VirtualZone[]>(MOCK_ZONES);
+  const [zones, setZones] = useState<VirtualZone[]>([]);
 
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.SYNC_QUEUE);
@@ -90,6 +97,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
   // Save changes to localStorage for persistent state across refreshes & navigation
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.CAMERAS, JSON.stringify(cameras));
+  }, [cameras]);
+
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
   }, [incidents]);
@@ -123,7 +134,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load backend data on mount & poll
   useEffect(() => {
     let ws: WebSocket | null = null;
-    let pollInterval: ReturnType<typeof setInterval>;
+    let pollTimeout: ReturnType<typeof setTimeout>;
+    let isComponentMounted = true;
+    let backoffDelay = 2000;
+    const MAX_BACKOFF = 30000;
+    let localNetworkStatus = 'offline';
 
     const loadBackendData = async () => {
       try {
@@ -135,8 +150,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ibvapApi.getSyncStatus()
         ]);
 
-        if (liveCams && liveCams.length > 0) setCameras(liveCams);
-        if (liveIncidents && liveIncidents.length > 0) {
+        if (liveCams) setCameras(liveCams);
+        if (liveIncidents) {
           // Preserve local unsynced states
           setIncidents(prev => {
             const unsyncedMap = new Map(prev.filter(i => !i.syncedToCloud).map(i => [i.id, i]));
@@ -144,7 +159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
         if (liveMetrics) setMetrics(prev => ({ ...prev, ...liveMetrics }));
-        if (liveZones && liveZones.length > 0) setZones(liveZones);
+        if (liveZones) setZones(liveZones);
         if (liveSync && liveSync.length > 0) {
           setSyncQueue(prev => {
             const localUnsynced = prev.filter(i => i.status === 'unsynced' || i.status === 'syncing' || i.status === 'failed');
@@ -153,28 +168,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return Array.from(mergedMap.values());
           });
         }
-
-        setNetworkStatusState('online');
       } catch (err) {
-        console.warn("Backend offline or unreachable, running in local edge mode:", err);
+        console.warn("Failed to load backend data:", err);
+        // DO NOT overwrite state with mock data or empty arrays here.
+        throw err;
+      }
+    };
+
+    const checkHealthAndConnect = async () => {
+      if (!isComponentMounted) return;
+      
+      try {
+        if (localNetworkStatus !== 'online') {
+          setNetworkStatusState('connecting');
+          localNetworkStatus = 'connecting';
+        }
+        
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1';
+        const healthUrl = API_BASE_URL.replace(/\/api\/v1\/?$/, '/health');
+        
+        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
+        if (!res.ok) throw new Error("Health check failed");
+        
+        const healthData = await res.json();
+        
+        if (healthData.status === 'healthy' || healthData.ready === true) {
+          // Backend is ready
+          backoffDelay = 2000; // reset backoff
+          if (localNetworkStatus !== 'online') {
+            await loadBackendData();
+            setNetworkStatusState('online');
+            localNetworkStatus = 'online';
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              connectWebSocket();
+            }
+          }
+          // Poll health slowly when online
+          pollTimeout = setTimeout(checkHealthAndConnect, 10000);
+        } else {
+          // Backend initializing
+          setNetworkStatusState('connecting');
+          localNetworkStatus = 'connecting';
+          pollTimeout = setTimeout(checkHealthAndConnect, 3000);
+        }
+      } catch (err) {
         setNetworkStatusState('offline');
+        localNetworkStatus = 'offline';
+        if (ws) {
+           ws.close();
+           ws = null;
+        }
+        // Exponential backoff
+        backoffDelay = Math.min(backoffDelay * 1.5, MAX_BACKOFF);
+        pollTimeout = setTimeout(checkHealthAndConnect, backoffDelay);
       }
     };
 
     const connectWebSocket = () => {
+      if (ws) return;
       const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/detections';
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        setNetworkStatusState('online');
-        loadBackendData();
+        // WS connected, but we rely on health check for 'online' status
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'incident_event') {
-            loadBackendData();
+            loadBackendData().catch(console.error);
           }
         } catch (e) {
           console.error("Failed to parse WS message", e);
@@ -182,8 +245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       ws.onclose = () => {
-        setNetworkStatusState('offline');
-        setTimeout(connectWebSocket, 4000);
+        ws = null;
       };
 
       ws.onerror = () => {
@@ -191,12 +253,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     };
 
-    connectWebSocket();
-    pollInterval = setInterval(loadBackendData, 6000);
+    checkHealthAndConnect();
 
     return () => {
+      isComponentMounted = false;
       if (ws) ws.close();
-      clearInterval(pollInterval);
+      clearTimeout(pollTimeout);
     };
   }, []);
 
@@ -254,7 +316,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Step 4: Mark incidents as synced to cloud
     const pendingIncIds = new Set(pendingItems.map(i => i.incidentId));
     setIncidents(prev => prev.map(inc =>
-      pendingIncIds.has(inc.id)
+      (pendingIncIds.has(inc.incidentId) || pendingIncIds.has(inc.id))
         ? { ...inc, syncedToCloud: true, syncedTimestamp: nowUtcStr, status: inc.status }
         : inc
     ));

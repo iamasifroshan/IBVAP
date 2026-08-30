@@ -95,6 +95,8 @@ class VirtualFenceEngine:
         self._track_zone_states: Dict[str, str] = {}
         # Track entry timestamps to calculate loitering duration
         self._entry_timestamps: Dict[str, float] = {}
+        # Active zone alert timestamps to handle throttling/cooldown
+        self._active_zone_alerts: Dict[str, float] = {}
 
     def clear_camera(self, camera_id: str):
         """Reset state for a camera before a new video run."""
@@ -102,6 +104,10 @@ class VirtualFenceEngine:
         for k in keys_to_delete:
             self._track_zone_states.pop(k, None)
             self._entry_timestamps.pop(k, None)
+        # Clear alert timestamps for this camera as well
+        alert_keys = [k for k in self._active_zone_alerts if k.startswith(f"{camera_id}:")]
+        for k in alert_keys:
+            self._active_zone_alerts.pop(k, None)
 
     def evaluate_frame_detections(
         self,
@@ -115,120 +121,140 @@ class VirtualFenceEngine:
     ) -> List[IncidentModel]:
         """
         Evaluates per-frame ByteTrack detections against all enabled zones for a camera.
-        Generates real IncidentModel records on OUTSIDE -> INSIDE state transitions.
+        Validates individual targets (humans, vehicles, animals) via SmartAlert logic.
+        Also triggers a group alert if the human count inside the zone exceeds the person_threshold.
         """
+        from database.models import CameraModel
         created_incidents: List[IncidentModel] = []
         enabled_zones = [z for z in zones if z.enabled and z.polygon_coordinates]
 
         if not enabled_zones or not detections:
             return created_incidents
 
-        # Track which (zone_id, track_id) pairs were seen in this frame
-        seen_keys_this_frame = set()
+        # Resolve camera name
+        cam = db.query(CameraModel).filter(
+            (CameraModel.camera_id == camera_id) | (CameraModel.id == camera_id)
+        ).first()
+        camera_name = cam.name if cam else camera_id
 
-        for det in detections:
-            track_id = det.get("track_id")
-            if track_id is None:
-                continue
+        for zone in enabled_zones:
+            # ── 1. Evaluate Individual Target Intrusions ──
+            humans_inside = []
+            for det in detections:
+                obj_type = det.get("object_type")
+                fine_class = det.get("fine_class")
+                
+                # Check zone object type filters
+                is_match = False
+                if zone.human_detection and (obj_type == "human" or fine_class == "person"):
+                    is_match = True
+                elif zone.vehicle_detection and obj_type == "vehicle":
+                    is_match = True
+                elif zone.animal_detection and obj_type == "animal":
+                    is_match = True
+                    
+                if not is_match:
+                    continue
 
-            bbox = det.get("bounding_box", {})
-            px, py = calculate_object_target_point(bbox)
-            fine_class = det.get("fine_class", "object")
-            object_type = det.get("object_type", "human")
-            conf = det.get("confidence", 0.0)
-
-            for zone in enabled_zones:
-                zone_id = zone.id
-                key = f"{camera_id}:{zone_id}:{track_id}"
-                seen_keys_this_frame.add(key)
-
+                bbox = det.get("bounding_box", {})
+                px, py = calculate_object_target_point(bbox)
+                
+                # Check if bottom-center ground contact point is inside the restricted zone
                 is_inside = point_in_polygon(px, py, zone.polygon_coordinates)
-                prev_state = self._track_zone_states.get(key, "OUTSIDE")
+                
+                track_id = det.get("track_id")
+                # Maintain state transitions in memory
+                state_key = f"{camera_id}:{zone.id}:{track_id}"
+                old_state = self._track_zone_states.get(state_key, "OUTSIDE")
 
                 if is_inside:
-                    if prev_state == "OUTSIDE":
-                        # ─────────────────────────────────────────────────────────────
-                        # STATE TRANSITION: OUTSIDE -> INSIDE (CANDIDATE INTRUSION BREACH)
-                        # ─────────────────────────────────────────────────────────────
-                        self._track_zone_states[key] = "INSIDE"
-                        self._entry_timestamps[key] = timestamp_sec
+                    if obj_type == "human" or fine_class == "person":
+                        humans_inside.append(det)
 
-                        # Query real frames_seen count from TrackRegistry or detection
-                        track_record = track_registry._get_camera_store(camera_id).get(track_id)
-                        frames_seen = track_record.frames_seen if track_record else det.get("frames_seen", 1)
+                    is_first_entry = (old_state == "OUTSIDE")
+                    self._track_zone_states[state_key] = "INSIDE"
 
-                        # Run SmartAlert 6-Rule Validation Engine
-                        is_confirmed, validation_checks, explanation = smart_alert_service.validate_candidate_event(
-                            camera_id=camera_id,
-                            track_id=track_id,
-                            fine_class=fine_class,
-                            object_type=object_type,
-                            confidence=conf,
-                            frames_seen=frames_seen,
-                            is_inside_zone=True,
-                            zone_name=zone.name,
-                            is_first_entry=True,
-                            timestamp_sec=timestamp_sec,
-                            db=db
-                        )
+                    # Resolve frames_seen history from track_registry
+                    frames_seen = 1
+                    if track_id is not None:
+                        try:
+                            tid_int = int(track_id)
+                            t_rec = track_registry._get_camera_store(camera_id).get(tid_int)
+                            if t_rec:
+                                frames_seen = t_rec.frames_seen
+                        except (ValueError, TypeError):
+                            pass
 
-                        if not is_confirmed:
-                            logger.info(f"SmartAlert SUPPRESSED candidate event for TRK#{track_id}: {explanation}")
-                            continue
+                    # Run 6-rule validation pipeline using SmartAlert service
+                    is_confirmed, checks, reason = smart_alert_service.validate_candidate_event(
+                        camera_id=camera_id,
+                        track_id=int(track_id) if track_id is not None else None,
+                        fine_class=fine_class or "person",
+                        object_type=obj_type or "human",
+                        confidence=det.get("confidence", 0.95),
+                        frames_seen=frames_seen,
+                        is_inside_zone=True,
+                        zone_name=zone.name,
+                        is_first_entry=is_first_entry,
+                        db=db
+                    )
 
-                        # Compute real threat metrics using BorderThreatEngine
+                    if is_confirmed:
+                        inc_uuid = str(uuid.uuid4())
+                        # Format canonical incident ID
+                        prefix = (obj_type or "human").upper()[:4]
+                        inc_id_str = f"INC-{prefix}-{inc_uuid[:8].upper()}"
+
+                        # Evaluate threat engine score
                         threat_score, threat_level, threat_factors, threat_explanation, rec_action = threat_engine.evaluate_threat(
-                            object_type=object_type,
-                            fine_class=fine_class,
+                            object_type=obj_type or "human",
+                            fine_class=fine_class or "person",
                             zone_breached=True,
                             zone_name=zone.name,
-                            zone_severity=zone.severity or "critical",
+                            zone_severity=zone.severity or "high",
                             frames_seen=frames_seen,
                             has_persistent_track=True,
                             loitering_sec=0.0,
                             direction_inward=True,
-                            confidence=conf,
-                            ai_reliability=int(conf * 100) if conf <= 1.0 else int(conf),
+                            confidence=det.get("confidence", 0.95),
+                            ai_reliability=int(det.get("confidence", 0.95) * 100),
                             environmental_condition="normal"
                         )
-
-                        inc_uuid = str(uuid.uuid4())
-                        inc_id_str = f"INC-2026-TRK{track_id:04d}-{inc_uuid[:6].upper()}"
 
                         db_inc = IncidentModel(
                             id=inc_uuid,
                             incident_id=inc_id_str,
                             camera_id=camera_id,
-                            camera_name=camera_id,
+                            camera_name=camera_name,
                             sector=zone.sector or "Sector B",
                             outpost="Border Outpost North",
-                            object_type=object_type,
-                            track_id=f"TRK#{track_id}",
+                            object_type=obj_type or "human",
+                            track_id=f"TRK#{track_id}" if track_id is not None else "UNTRACKED",
                             event_type="RESTRICTED_ZONE_BREACH",
                             threat_score=threat_score,
                             threat_level=threat_level,
                             threat_factors=threat_factors,
-                            explainable_reason=threat_explanation,
+                            explainable_reason=reason,
                             environment="normal",
-                            ai_reliability=int(conf * 100),
+                            ai_reliability=int(det.get("confidence", 0.95) * 100),
                             visibility_score=90,
                             status="active",
                             sync_status="unsynced",
                             snapshot_url="",
                             zone_name=zone.name,
                             loitering_duration_sec=0,
-                            speed_kmh=4.2 if object_type == "human" else 18.5,
+                            speed_kmh=4.2,
                             direction="Inward Perimeter",
                             smart_alert_confirmed=True,
-                            validation_checks=validation_checks,
+                            validation_checks=checks,
                             synced_to_cloud=False,
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.utcnow()
                         )
-
                         db.add(db_inc)
                         db.commit()
                         db.refresh(db_inc)
 
+                        # Extract snapshot and video clip evidence files
                         if video_path and os.path.exists(video_path):
                             from ai.evidence_generator import evidence_generator
                             try:
@@ -237,34 +263,118 @@ class VirtualFenceEngine:
                                     frame_index=frame_index,
                                     incident=db_inc,
                                     bounding_box=bbox,
-                                    confidence=conf,
+                                    confidence=det.get("confidence", 0.95),
                                     db=db
                                 )
                                 if snap_url:
                                     db_inc.snapshot_url = snap_url
+                                    db.commit()
                             except Exception as ev_err:
                                 logger.warning(f"Evidence generation failed for {inc_id_str}: {str(ev_err)}")
 
-                        # Enqueue into persistent SQLite sync queue
+                        # Enqueue in SQLite sync queue
                         from ai.edge_sync import edge_sync
                         edge_sync.enqueue_incident(db_inc, db)
 
                         created_incidents.append(db_inc)
-                        logger.info(f"REAL SMARTALERT CONFIRMED INCIDENT: {inc_id_str} for TRK#{track_id} in zone '{zone.name}'")
+                        logger.info(f"SMARTALERT CONFIRMED INCIDENT: {inc_id_str} for track {track_id} in zone '{zone.name}'")
+                else:
+                    self._track_zone_states[state_key] = "OUTSIDE"
 
-                    else:
-                        # Continue inside zone (LOITERING) — NO duplicate incident created!
-                        pass
+            # ── 2. Evaluate Group Intrusion Alerts (Exceeds person_threshold) ──
+            person_count = len(humans_inside)
+            threshold = getattr(zone, "person_threshold", 1)
 
-                else: # NOT inside
-                    if prev_state == "INSIDE":
-                        # ─────────────────────────────────────────────────────────────
-                        # STATE TRANSITION: INSIDE -> OUTSIDE (EXITED RESTRICTED ZONE)
-                        # ─────────────────────────────────────────────────────────────
-                        self._track_zone_states[key] = "OUTSIDE"
-                        entry_ts = self._entry_timestamps.pop(key, timestamp_sec)
-                        loiter_dur = round(timestamp_sec - entry_ts, 1)
-                        logger.info(f"TRK#{track_id} exited zone '{zone.name}' after {loiter_dur}s loitering")
+            if person_count >= threshold:
+                alert_key = f"{camera_id}:{zone.id}:GROUP"
+                last_alert_time = self._active_zone_alerts.get(alert_key, 0.0)
+                cooldown = max(30.0, float(zone.loitering_limit_sec or 15.0))
+
+                if (timestamp_sec - last_alert_time) > cooldown:
+                    self._active_zone_alerts[alert_key] = timestamp_sec
+
+                    track_ids = [det.get("track_id") for det in humans_inside if det.get("track_id") is not None]
+                    track_ids_str = ", ".join(f"TRK#{tid}" for tid in track_ids) if track_ids else "MULTIPLE-TRACK"
+                    max_conf = max(det.get("confidence", 0.0) for det in humans_inside) if humans_inside else 0.95
+
+                    threat_score, threat_level, threat_factors, threat_explanation, rec_action = threat_engine.evaluate_threat(
+                        object_type="human",
+                        fine_class="person",
+                        zone_breached=True,
+                        zone_name=zone.name,
+                        zone_severity=zone.severity or "critical",
+                        frames_seen=10,
+                        has_persistent_track=True,
+                        loitering_sec=0.0,
+                        direction_inward=True,
+                        confidence=max_conf,
+                        ai_reliability=int(max_conf * 100),
+                        environmental_condition="normal"
+                    )
+
+                    explainable_reason = f"Multiple individuals ({person_count}) detected inside restricted zone '{zone.name}' simultaneously."
+                    inc_uuid = str(uuid.uuid4())
+                    inc_id_str = f"INC-2026-GROUP-{inc_uuid[:6].upper()}"
+
+                    db_inc = IncidentModel(
+                        id=inc_uuid,
+                        incident_id=inc_id_str,
+                        camera_id=camera_id,
+                        camera_name=camera_name,
+                        sector=zone.sector or "Sector B",
+                        outpost="Border Outpost North",
+                        object_type="group",
+                        track_id=track_ids_str,
+                        event_type="RESTRICTED_ZONE_BREACH",
+                        threat_score=threat_score,
+                        threat_level=zone.severity or threat_level,
+                        threat_factors=[
+                            {"category": "Group Presence", "scoreContribution": 40, "description": f"Detected {person_count} individuals in restricted area"},
+                            {"category": "Zone Breach", "scoreContribution": 40, "description": f"Crossed into {zone.name}"}
+                        ],
+                        explainable_reason=explainable_reason,
+                        environment="normal",
+                        ai_reliability=int(max_conf * 100),
+                        visibility_score=90,
+                        status="active",
+                        sync_status="unsynced",
+                        snapshot_url="",
+                        zone_name=zone.name,
+                        loitering_duration_sec=0,
+                        speed_kmh=4.2,
+                        direction="Inward Perimeter",
+                        smart_alert_confirmed=True,
+                        validation_checks={"rule": "Multiple Persons Alert"},
+                        synced_to_cloud=False,
+                        timestamp=datetime.utcnow()
+                    )
+                    db.add(db_inc)
+                    db.commit()
+                    db.refresh(db_inc)
+
+                    if video_path and os.path.exists(video_path):
+                        from ai.evidence_generator import evidence_generator
+                        try:
+                            first_bbox = humans_inside[0].get("bounding_box", {}) if humans_inside else {}
+                            snap_url, clip_url = evidence_generator.generate_incident_evidence(
+                                video_path=video_path,
+                                frame_index=frame_index,
+                                incident=db_inc,
+                                bounding_box=first_bbox,
+                                confidence=max_conf,
+                                db=db
+                            )
+                            if snap_url:
+                                db_inc.snapshot_url = snap_url
+                                db.commit()
+                        except Exception as ev_err:
+                            logger.warning(f"Evidence generation failed for {inc_id_str}: {str(ev_err)}")
+
+                    from ai.edge_sync import edge_sync
+                    edge_sync.enqueue_incident(db_inc, db)
+
+                    created_incidents.append(db_inc)
+                    logger.info(f"REAL SMARTALERT CONFIRMED GROUP INCIDENT: {inc_id_str} for {track_ids_str} in zone '{zone.name}'")
 
         return created_incidents
 

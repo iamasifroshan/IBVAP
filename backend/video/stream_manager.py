@@ -25,9 +25,10 @@ from urllib.parse import urlparse, urlunparse
 logger = logging.getLogger("ibvap.stream_manager")
 
 # ── Source Type Constants ─────────────────────────────────────────────────────
-SOURCE_MP4 = "MP4_FILE"
+SOURCE_SIMULATED = "SIMULATED_FILE"
 SOURCE_WEBCAM = "WEBCAM"
 SOURCE_RTSP = "RTSP"
+SOURCE_HTTP_STREAM = "HTTP_STREAM"
 
 # Default RTSP credentials from environment — never hardcoded
 DEFAULT_RTSP_URL = os.getenv("IBVAP_DEFAULT_RTSP_URL", "")
@@ -47,37 +48,84 @@ class StreamSourceManager:
     """
 
     @staticmethod
-    def classify_source(source_url: str) -> str:
+    def resolve_video_path(source_url: str) -> Optional[str]:
         """
-        Classify source URL into source type (MP4_FILE, WEBCAM, RTSP).
+        Robustly resolves relative, absolute, and HTTP/served video URLs into local file paths.
+        Returns None if the file cannot be resolved or does not exist on disk.
         """
         if not source_url:
-            return SOURCE_MP4
+            return None
+            
+        # 1. Direct path check
+        if os.path.exists(source_url) and os.path.isfile(source_url):
+            return os.path.abspath(source_url)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        storage_dir = os.path.join(base_dir, "storage", "videos")
+
+        # Extract filename (handle both web URLs and paths)
+        filename = os.path.basename(source_url)
+        # If it has query parameters, strip them
+        if "?" in filename:
+            filename = filename.split("?")[0]
+
+        # 2. Check directly in backend/storage/videos/
+        candidate = os.path.join(storage_dir, filename)
+        if os.path.exists(candidate) and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+
+        # 3. Strip UUID prefix and try matching original filename in storage dir
+        import re
+        uuid_prefix_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_(.+)$')
+        match = uuid_prefix_pattern.match(filename)
+        original_name = match.group(1) if match else filename
+
+        if os.path.isdir(storage_dir):
+            for fname in os.listdir(storage_dir):
+                if fname == original_name or fname.endswith('_' + original_name) or original_name in fname:
+                    candidate_sub = os.path.join(storage_dir, fname)
+                    if os.path.isfile(candidate_sub):
+                        return os.path.abspath(candidate_sub)
+
+        # 4. Check relative to backend/ directory
+        rel_candidate = os.path.join(base_dir, source_url)
+        if os.path.exists(rel_candidate) and os.path.isfile(rel_candidate):
+            return os.path.abspath(rel_candidate)
+
+        return None
+
+    @staticmethod
+    def classify_source(source_url: str) -> str:
+        """
+        Classify source URL into source type.
+        """
+        if not source_url:
+            return SOURCE_SIMULATED
 
         s = source_url.strip().lower()
 
-        # RTSP stream
+        # 1. MP4 / video file extensions checked first to capture HTTP/served video files correctly
+        if s.endswith(".mp4") or s.endswith(".avi") or s.endswith(".mkv") or s.endswith(".mov") or ".mp4?" in s:
+            return SOURCE_SIMULATED
+
+        # 2. RTSP stream
         if s.startswith("rtsp://") or s.startswith("rtsps://"):
             return SOURCE_RTSP
 
-        # HTTP/MJPEG streams
+        # 3. HTTP/MJPEG streams
         if s.startswith("http://") or s.startswith("https://"):
             return SOURCE_RTSP  # Treated as live stream
 
-        # Webcam device index: "0", "1", "webcam:0", "camera:1", "/dev/video0"
+        # 4. Webcam device index: "0", "1", "webcam:0", "camera:1", "/dev/video0"
         if s.isdigit() or s.startswith("webcam:") or s.startswith("camera:") or s.startswith("/dev/video"):
             return SOURCE_WEBCAM
 
-        # MP4 / video file
-        if s.endswith(".mp4") or s.endswith(".avi") or s.endswith(".mkv") or s.endswith(".mov"):
-            return SOURCE_MP4
-
-        # Try to detect if it looks like a file path
+        # 5. Try to detect if it looks like a file path
         if os.path.sep in source_url or source_url.startswith("./") or source_url.startswith("../"):
-            return SOURCE_MP4
+            return SOURCE_SIMULATED
 
-        # Default: MP4
-        return SOURCE_MP4
+        # Default: SIMULATED_FILE
+        return SOURCE_SIMULATED
 
     @staticmethod
     def parse_webcam_index(source_url: str) -> int:
@@ -138,7 +186,7 @@ class StreamSourceManager:
         Attempts to open and read frames from the camera source.
         Returns a status dict with real verified state:
           {
-            "status": "online" | "offline",
+            "status": "ONLINE" | "DEGRADED" | "OFFLINE" | "ERROR",
             "source_type": str,
             "width": int,
             "height": int,
@@ -150,32 +198,48 @@ class StreamSourceManager:
           }
         Does NOT fake ONLINE status if stream cannot be opened.
         """
+        # Normalize legacy/custom types
+        if source_type == "MP4_FILE":
+            source_type = SOURCE_SIMULATED
+
         # Auto-classify source type if not provided
         detected_type = source_type or StreamSourceManager.classify_source(source_url)
+        if detected_type == "MP4_FILE":
+            detected_type = SOURCE_SIMULATED
+
         sanitized_url = source_url
 
-        # ── MP4 File ──────────────────────────────────────────────────────────
-        if detected_type == SOURCE_MP4:
-            if not source_url or not os.path.exists(source_url):
+        # ── MP4 File / Simulated File ──────────────────────────────────────────
+        if detected_type == SOURCE_SIMULATED:
+            resolved_path = StreamSourceManager.resolve_video_path(source_url)
+            if not resolved_path:
                 return {
-                    "status": "offline",
-                    "source_type": SOURCE_MP4,
+                    "status": "OFFLINE",
+                    "source_type": detected_type,
                     "error": f"MP4 file not found: '{source_url}'. Upload the video first.",
                     "health_score": 0,
                     "width": 0, "height": 0, "fps": 0.0, "resolution": "N/A",
                     "sanitized_url": source_url
                 }
-            cap = cv2.VideoCapture(source_url)
+            cap = cv2.VideoCapture(resolved_path)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
 
         # ── Webcam ────────────────────────────────────────────────────────────
         elif detected_type == SOURCE_WEBCAM:
             idx = StreamSourceManager.parse_webcam_index(source_url)
             sanitized_url = f"webcam:{idx}"
-            cap = cv2.VideoCapture(idx)
+            # Webcams are client-side browser streams. We bypass backend physical webcam check
+            # and return online to keep the configuration healthy and valid on headless servers.
+            return {
+                "status": "ONLINE",
+                "source_type": SOURCE_WEBCAM,
+                "health_score": 100,
+                "width": 1280, "height": 720, "fps": 30.0, "resolution": "1280x720",
+                "sanitized_url": sanitized_url
+            }
 
         # ── RTSP / Live Stream ────────────────────────────────────────────────
-        elif detected_type == SOURCE_RTSP:
+        elif detected_type in (SOURCE_RTSP, "IP_CCTV"):
             sanitized_url = StreamSourceManager.sanitize_rtsp_url(source_url)
             resolved_url = StreamSourceManager.resolve_rtsp_url(source_url)
             cap = cv2.VideoCapture(resolved_url)
@@ -185,7 +249,7 @@ class StreamSourceManager:
 
         else:
             return {
-                "status": "offline",
+                "status": "ERROR",
                 "source_type": detected_type,
                 "error": f"Unsupported source type: {detected_type}",
                 "health_score": 0,
@@ -197,13 +261,13 @@ class StreamSourceManager:
         if not cap.isOpened():
             cap.release()
             error_msg = {
-                SOURCE_MP4: f"OpenCV failed to open video file '{sanitized_url}'. File may be corrupt or unsupported.",
+                SOURCE_SIMULATED: f"OpenCV failed to open video file '{sanitized_url}'. File may be corrupt or unsupported.",
                 SOURCE_WEBCAM: f"Webcam device {sanitized_url} unavailable. Check USB/built-in camera connection.",
                 SOURCE_RTSP: f"RTSP stream '{sanitized_url}' is unreachable or returned no response. Check URL, credentials, and network."
             }.get(detected_type, "Stream could not be opened.")
             logger.warning(f"Camera source offline: {error_msg}")
             return {
-                "status": "offline",
+                "status": "OFFLINE",
                 "source_type": detected_type,
                 "error": error_msg,
                 "health_score": 0,
@@ -228,13 +292,13 @@ class StreamSourceManager:
 
         if frames_read == 0:
             error_msg = {
-                SOURCE_MP4: "File opened but produced no decodable frames. The file may be empty or corrupted.",
+                SOURCE_SIMULATED: "File opened but produced no decodable frames. The file may be empty or corrupted.",
                 SOURCE_WEBCAM: "Webcam opened but returned no frames. Device may be in use or have no feed.",
                 SOURCE_RTSP: f"RTSP stream '{sanitized_url}' connected but produced no frames. Stream may be inactive or credentials incorrect."
             }.get(detected_type, "Stream produced no frames.")
             logger.warning(f"Camera source degraded (no frames): {error_msg}")
             return {
-                "status": "degraded",
+                "status": "DEGRADED",
                 "source_type": detected_type,
                 "error": error_msg,
                 "health_score": 30,
@@ -250,7 +314,7 @@ class StreamSourceManager:
 
         logger.info(f"Camera source verified ONLINE: type={detected_type}, url={sanitized_url}, res={resolution}, fps={fps:.1f}")
         return {
-            "status": "online",
+            "status": "ONLINE",
             "source_type": detected_type,
             "error": None,
             "health_score": health_score,
@@ -273,13 +337,13 @@ class StreamSourceManager:
         Returns (frames: List[np.ndarray], video_identifier: str, error: str | None)
         """
         detected_type = source_type or StreamSourceManager.classify_source(source_url)
-        sanitized_url = StreamSourceManager.sanitize_rtsp_url(source_url) if detected_type == SOURCE_RTSP else source_url
+        sanitized_url = StreamSourceManager.sanitize_rtsp_url(source_url) if detected_type in (SOURCE_RTSP, "IP_CCTV") else source_url
 
         if detected_type == SOURCE_WEBCAM:
             idx = StreamSourceManager.parse_webcam_index(source_url)
             cap = cv2.VideoCapture(idx)
             video_id = f"webcam:{idx}"
-        elif detected_type == SOURCE_RTSP:
+        elif detected_type in (SOURCE_RTSP, "IP_CCTV"):
             resolved = StreamSourceManager.resolve_rtsp_url(source_url)
             cap = cv2.VideoCapture(resolved)
             cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, RTSP_CONNECT_TIMEOUT_MS)

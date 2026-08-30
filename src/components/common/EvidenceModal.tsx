@@ -25,6 +25,7 @@ import { Incident } from '../../types';
 import { Badge } from './Badge';
 import { useApp } from '../../context/AppContext';
 import { evaluateSmartAlert } from '../../services/smartAlertEngine';
+import { API_BASE_URL } from '../../services/apiConfig';
 
 interface EvidenceModalProps {
   incident: Incident | null;
@@ -211,7 +212,7 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                 <div className="relative bg-[#0A0F1A]">
                   <img
                     src={incident.snapshotUrl
-                      ? (incident.snapshotUrl.startsWith('/') ? `http://localhost:8000${incident.snapshotUrl}` : incident.snapshotUrl)
+                      ? (incident.snapshotUrl.startsWith('/') ? `${API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '')}${incident.snapshotUrl}` : incident.snapshotUrl)
                       : 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?q=80&w=800&auto=format&fit=crop'
                     }
                     alt="Incident Evidence Snapshot"

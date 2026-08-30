@@ -134,7 +134,7 @@ def process_camera_video(
     cam.source_url = target_path
     cam.fps = int(meta["fps"])
     cam.resolution = f"{meta['width']}x{meta['height']}"
-    cam.status = "online"
+    cam.status = "ONLINE"
     cam.last_activity = "Live Video Stream Active"
 
     env_meta = meta.get("environment", {})

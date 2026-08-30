@@ -185,6 +185,38 @@ export const VirtualFencePage: React.FC = () => {
     setDeleteConfirmId(null);
   };
 
+  // ── Save existing zones changes ─────────────────────────────────────────────
+  const saveChanges = async () => {
+    setSaving(true);
+    try {
+      await Promise.all(
+        overlays.map(async (zone) => {
+          await ibvapApi.updateZone(zone.id, {
+            id: zone.id,
+            name: zone.name,
+            sector: zone.sector,
+            type: zone.type,
+            sensitivity: zone.sensitivity,
+            minThreatThreshold: zone.minThreatThreshold,
+            loiteringLimitSec: zone.loiteringLimitSec,
+            active: zone.active,
+            points: zone.points,
+            humanDetection: zone.humanDetection,
+            vehicleDetection: zone.vehicleDetection,
+            animalDetection: zone.animalDetection,
+            personThreshold: zone.personThreshold,
+            alertSeverity: zone.alertSeverity,
+          } as any);
+        })
+      );
+      await loadZones();
+    } catch (err) {
+      console.warn('Failed to save zones:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Edit mode: drag points ─────────────────────────────────────────────────
   const handleMouseDown = (zoneId: string, pointIdx: number) => {
     if (drawMode !== 'edit') return;
@@ -257,10 +289,11 @@ export const VirtualFencePage: React.FC = () => {
             <Plus className="w-4 h-4" /> Create Zone
           </button>
           <button
-            onClick={() => setSaving(true)}
-            className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-[#0B1F33] text-[13px] font-semibold rounded-lg shadow-sm flex items-center gap-2 transition-colors"
+            onClick={saveChanges}
+            disabled={saving}
+            className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-[#0B1F33] text-[13px] font-semibold rounded-lg shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50"
           >
-            <Save className="w-4 h-4" /> Save Changes
+            {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Changes
           </button>
         </div>
       </div>
