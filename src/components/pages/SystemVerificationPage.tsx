@@ -21,6 +21,7 @@ export const SystemVerificationPage: React.FC = () => {
     { name: 'Queue sync works', subsystem: 'EdgeGuard', status: 'PENDING' },
   ]);
   const [isRunning, setIsRunning] = useState(false);
+  const [healthData, setHealthData] = useState<any>(null);
 
   const runVerification = async () => {
     setIsRunning(true);
@@ -29,8 +30,15 @@ export const SystemVerificationPage: React.FC = () => {
 
     // 1. Check API reachable
     try {
-      await fetch('http://localhost:8000/health');
-      newTests[0].status = 'PASS';
+      const res = await fetch('http://localhost:8000/health');
+      const data = await res.json();
+      setHealthData(data);
+      if (data.status === 'healthy' || data.status === 'degraded') {
+        newTests[0].status = 'PASS';
+      } else {
+        newTests[0].status = 'FAIL';
+        newTests[0].error = `Backend status: ${data.status}`;
+      }
     } catch (e: any) {
       newTests[0].status = 'FAIL';
       newTests[0].error = 'Failed to fetch /health. Backend is down.';
@@ -125,6 +133,50 @@ export const SystemVerificationPage: React.FC = () => {
           {isRunning ? 'Running Tests...' : 'Run All Tests'}
         </button>
       </div>
+      
+      {healthData && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">Backend</h3>
+            <p className={`font-bold ${healthData.status === 'healthy' ? 'text-green-600' : 'text-amber-600'}`}>
+              {healthData.status.toUpperCase()}
+            </p>
+          </Card>
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">Database</h3>
+            <p className={`font-bold ${healthData.database === 'healthy' ? 'text-green-600' : 'text-red-600'}`}>
+              {healthData.database.toUpperCase()}
+            </p>
+          </Card>
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">Cameras</h3>
+            <p className="font-bold text-[#0B1F33]">
+              {healthData.cameras?.online || 0} / {healthData.cameras?.total || 0} ONLINE
+            </p>
+          </Card>
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">AI Subsystems</h3>
+            <p className={`font-bold ${healthData.ai_subsystems?.overall === 'READY' ? 'text-green-600' : 'text-red-600'}`}>
+              {healthData.ai_subsystems?.overall || 'UNKNOWN'}
+            </p>
+            <div className="text-[10px] text-slate-500 mt-1">
+              YOLO: {healthData.ai_subsystems?.yolo} | YuNet: {healthData.ai_subsystems?.yunet} | SFace: {healthData.ai_subsystems?.sface}
+            </div>
+          </Card>
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">Memory Usage</h3>
+            <p className="font-bold text-[#0B1F33]">
+              {healthData.runtime?.memory_mb} MB
+            </p>
+          </Card>
+          <Card className="p-4 bg-white border border-slate-200">
+            <h3 className="text-xs text-slate-500 uppercase tracking-wider font-bold mb-1">Uptime</h3>
+            <p className="font-bold text-[#0B1F33]">
+              {healthData.runtime?.uptime_seconds}s
+            </p>
+          </Card>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4">
         {tests.map((test, idx) => (

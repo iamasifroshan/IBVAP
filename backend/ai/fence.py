@@ -122,7 +122,8 @@ class VirtualFenceEngine:
         """
         Evaluates per-frame ByteTrack detections against all enabled zones for a camera.
         Validates individual targets (humans, vehicles, animals) via SmartAlert logic.
-        Also triggers a group alert if the human count inside the zone exceeds the person_threshold.
+        - If recognized as a known person, no incident is automatically generated.
+        - If recognized as UNKNOWN PERSON DETECTED, creates an incident.
         """
         from database.models import CameraModel
         created_incidents: List[IncidentModel] = []
@@ -172,7 +173,6 @@ class VirtualFenceEngine:
                         humans_inside.append(det)
 
                     is_first_entry = (old_state == "OUTSIDE")
-                    self._track_zone_states[state_key] = "INSIDE"
 
                     # Resolve frames_seen history from track_registry
                     frames_seen = 1
@@ -185,18 +185,21 @@ class VirtualFenceEngine:
                         except (ValueError, TypeError):
                             pass
 
-                    # Run 6-rule validation pipeline using SmartAlert service
-                    is_confirmed, checks, reason = smart_alert_service.validate_candidate_event(
+                    # The authoritative incident gate determines everything, including identity
+                    is_confirmed, checks, reason, person_name, face_recognized, face_confidence = smart_alert_service.validate_candidate_event(
                         camera_id=camera_id,
                         track_id=int(track_id) if track_id is not None else None,
                         fine_class=fine_class or "person",
                         object_type=obj_type or "human",
                         confidence=det.get("confidence", 0.95),
                         frames_seen=frames_seen,
-                        is_inside_zone=True,
+                        is_inside_zone=is_inside,
                         zone_name=zone.name,
                         is_first_entry=is_first_entry,
-                        db=db
+                        timestamp_sec=det.get("timestamp_sec", 0.0),
+                        db=db,
+                        bbox=det.get("bounding_box", {}),
+                        face_metadata=det.get("face")
                     )
 
                     if is_confirmed:
@@ -248,6 +251,9 @@ class VirtualFenceEngine:
                             smart_alert_confirmed=True,
                             validation_checks=checks,
                             synced_to_cloud=False,
+                            person_name=person_name,
+                            face_recognized=face_recognized,
+                            face_confidence=face_confidence,
                             timestamp=datetime.utcnow()
                         )
                         db.add(db_inc)
@@ -277,104 +283,12 @@ class VirtualFenceEngine:
                         edge_sync.enqueue_incident(db_inc, db)
 
                         created_incidents.append(db_inc)
+                        self._track_zone_states[state_key] = "INSIDE"
                         logger.info(f"SMARTALERT CONFIRMED INCIDENT: {inc_id_str} for track {track_id} in zone '{zone.name}'")
                 else:
                     self._track_zone_states[state_key] = "OUTSIDE"
 
-            # ── 2. Evaluate Group Intrusion Alerts (Exceeds person_threshold) ──
-            person_count = len(humans_inside)
-            threshold = getattr(zone, "person_threshold", 1)
 
-            if person_count >= threshold:
-                alert_key = f"{camera_id}:{zone.id}:GROUP"
-                last_alert_time = self._active_zone_alerts.get(alert_key, 0.0)
-                cooldown = max(30.0, float(zone.loitering_limit_sec or 15.0))
-
-                if (timestamp_sec - last_alert_time) > cooldown:
-                    self._active_zone_alerts[alert_key] = timestamp_sec
-
-                    track_ids = [det.get("track_id") for det in humans_inside if det.get("track_id") is not None]
-                    track_ids_str = ", ".join(f"TRK#{tid}" for tid in track_ids) if track_ids else "MULTIPLE-TRACK"
-                    max_conf = max(det.get("confidence", 0.0) for det in humans_inside) if humans_inside else 0.95
-
-                    threat_score, threat_level, threat_factors, threat_explanation, rec_action = threat_engine.evaluate_threat(
-                        object_type="human",
-                        fine_class="person",
-                        zone_breached=True,
-                        zone_name=zone.name,
-                        zone_severity=zone.severity or "critical",
-                        frames_seen=10,
-                        has_persistent_track=True,
-                        loitering_sec=0.0,
-                        direction_inward=True,
-                        confidence=max_conf,
-                        ai_reliability=int(max_conf * 100),
-                        environmental_condition="normal"
-                    )
-
-                    explainable_reason = f"Multiple individuals ({person_count}) detected inside restricted zone '{zone.name}' simultaneously."
-                    inc_uuid = str(uuid.uuid4())
-                    inc_id_str = f"INC-2026-GROUP-{inc_uuid[:6].upper()}"
-
-                    db_inc = IncidentModel(
-                        id=inc_uuid,
-                        incident_id=inc_id_str,
-                        camera_id=camera_id,
-                        camera_name=camera_name,
-                        sector=zone.sector or "Sector B",
-                        outpost="Border Outpost North",
-                        object_type="group",
-                        track_id=track_ids_str,
-                        event_type="RESTRICTED_ZONE_BREACH",
-                        threat_score=threat_score,
-                        threat_level=zone.severity or threat_level,
-                        threat_factors=[
-                            {"category": "Group Presence", "scoreContribution": 40, "description": f"Detected {person_count} individuals in restricted area"},
-                            {"category": "Zone Breach", "scoreContribution": 40, "description": f"Crossed into {zone.name}"}
-                        ],
-                        explainable_reason=explainable_reason,
-                        environment="normal",
-                        ai_reliability=int(max_conf * 100),
-                        visibility_score=90,
-                        status="active",
-                        sync_status="unsynced",
-                        snapshot_url="",
-                        zone_name=zone.name,
-                        loitering_duration_sec=0,
-                        speed_kmh=4.2,
-                        direction="Inward Perimeter",
-                        smart_alert_confirmed=True,
-                        validation_checks={"rule": "Multiple Persons Alert"},
-                        synced_to_cloud=False,
-                        timestamp=datetime.utcnow()
-                    )
-                    db.add(db_inc)
-                    db.commit()
-                    db.refresh(db_inc)
-
-                    if video_path and os.path.exists(video_path):
-                        from ai.evidence_generator import evidence_generator
-                        try:
-                            first_bbox = humans_inside[0].get("bounding_box", {}) if humans_inside else {}
-                            snap_url, clip_url = evidence_generator.generate_incident_evidence(
-                                video_path=video_path,
-                                frame_index=frame_index,
-                                incident=db_inc,
-                                bounding_box=first_bbox,
-                                confidence=max_conf,
-                                db=db
-                            )
-                            if snap_url:
-                                db_inc.snapshot_url = snap_url
-                                db.commit()
-                        except Exception as ev_err:
-                            logger.warning(f"Evidence generation failed for {inc_id_str}: {str(ev_err)}")
-
-                    from ai.edge_sync import edge_sync
-                    edge_sync.enqueue_incident(db_inc, db)
-
-                    created_incidents.append(db_inc)
-                    logger.info(f"REAL SMARTALERT CONFIRMED GROUP INCIDENT: {inc_id_str} for {track_ids_str} in zone '{zone.name}'")
 
         return created_incidents
 

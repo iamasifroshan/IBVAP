@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, JSON
+from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, JSON, ForeignKey
+from sqlalchemy.orm import relationship
 from database.db import Base
 
 class CameraModel(Base):
@@ -59,6 +60,7 @@ class DetectionModel(Base):
     frame_index = Column(Integer, nullable=True)         # video frame number
     timestamp_sec = Column(Float, nullable=True)         # seconds into video
     bounding_box = Column(JSON, default=dict)
+    face = Column(JSON, nullable=True)  # Associated face recognition metadata
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 class TrackModel(Base):
@@ -82,6 +84,7 @@ class TrackModel(Base):
     frames_seen = Column(Integer, default=1)
     video_ts_first_sec = Column(Float, default=0.0)
     video_ts_last_sec = Column(Float, default=0.0)
+    face = Column(JSON, nullable=True)  # Last seen face recognition metadata
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -135,6 +138,9 @@ class IncidentModel(Base):
     validation_checks = Column(JSON, default=dict)
     synced_to_cloud = Column(Boolean, default=False)
     synced_timestamp = Column(String, nullable=True)
+    person_name = Column(String, nullable=True, default="UNKNOWN")
+    face_recognized = Column(Boolean, nullable=True, default=False)
+    face_confidence = Column(Float, nullable=True, default=0.0)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 class EvidenceModel(Base):
@@ -210,5 +216,52 @@ class ModelRegistryModel(Base):
     map50 = Column(Float, default=0.0)
     map50_95 = Column(Float, default=0.0)
     model_path = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RegisteredPersonModel(Base):
+    __tablename__ = "registered_people"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    identity_code = Column(String, unique=True, index=True, nullable=True)
+    face_embedding = Column(JSON, nullable=False)  # stored as list of floats
+    image_path = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    references = relationship("FaceReferenceModel", back_populates="person", cascade="all, delete-orphan")
+
+
+class FaceReferenceModel(Base):
+    __tablename__ = "face_references"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("registered_people.person_id"), index=True, nullable=False)
+    face_embedding = Column(JSON, nullable=False)  # stored as list of floats
+    image_path = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    person = relationship("RegisteredPersonModel", back_populates="references")
+
+
+class ANPRObservationModel(Base):
+    __tablename__ = "anpr_observations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    anpr_id = Column(String, unique=True, index=True, nullable=False)
+    camera_id = Column(String, nullable=False, index=True)
+    vehicle_track_id = Column(Integer, nullable=False, index=True)
+    vehicle_track_label = Column(String, nullable=False)
+    vehicle_class = Column(String, nullable=False, default="car")
+    plate_text = Column(String, nullable=False, index=True)
+    raw_ocr_text = Column(String, nullable=True)
+    confidence = Column(Float, default=0.0)
+    format_valid = Column(Boolean, default=False)
+    direction = Column(String, default="unknown")
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -42,7 +42,7 @@ def broadcast_event_sync(event_type: str, payload: dict):
     """
     try:
         loop = asyncio.get_running_loop()
-        message = json.dumps({"type": event_type, "payload": payload})
+        message = json.dumps({"type": event_type, "payload": payload}, default=str)
         loop.create_task(manager.broadcast(message))
     except RuntimeError:
         pass # No event loop running

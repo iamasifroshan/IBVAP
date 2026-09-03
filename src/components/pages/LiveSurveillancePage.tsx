@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ibvapApi } from '../../services/apiClient';
+import { getCameraById } from '../../types';
 
 interface ZonePolygon {
   name: string;
@@ -19,7 +20,8 @@ export const LiveSurveillancePage: React.FC = () => {
     environment,
     addIncident,
     metrics,
-    updateCamera
+    updateCamera,
+    networkStatus
   } = useApp();
 
   // Mode & Playback states
@@ -36,12 +38,16 @@ export const LiveSurveillancePage: React.FC = () => {
   const [webcamFPS, setWebcamFPS] = useState<number>(0);
   const [inferenceLatency, setInferenceLatency] = useState<number>(0);
   const [personCount, setPersonCount] = useState<number>(0);
+  const [evidenceUploaded, setEvidenceUploaded] = useState<boolean>(false);
   const [webcamStatus, setWebcamStatus] = useState<'NORMAL' | 'ALERT' | 'NO HUMAN DETECTED'>('NO HUMAN DETECTED');
   const [lastDetectionTime, setLastDetectionTime] = useState<string>('Never');
 
   // Real-time YOLO lists
   const [realDetections, setRealDetections] = useState<any[]>([]);
   const [realTracks, setRealTracks] = useState<any[]>([]);
+  // Vehicle detection state
+  const [vehicleCount, setVehicleCount] = useState<number>(0);
+  const [vehicleDetections, setVehicleDetections] = useState<any[]>([]);
 
   // Canvas / Video Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -50,9 +56,34 @@ export const LiveSurveillancePage: React.FC = () => {
   const inferenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAlertingRef = useRef<boolean>(false);
   const lastAlertTimeRef = useRef<number>(0);
+  const wasPausedForNetworkRef = useRef<boolean>(false);
+  // Ref that always mirrors webcamActive — lets runFrameInference read the
+  // current value without stale closure issues.
+  const webcamActiveRef = useRef<boolean>(false);
+  // Guard: only one inference request in-flight at a time to prevent pile-up
+  const isInferenceInFlightRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
+  const seqCounterRef = useRef<number>(0);
+  const inferenceTimestampsRef = useRef<number[]>([]);
 
-  const activeCamera = cameras.find(c => c.id === activeCameraId) || cameras[0];
+  const activeCamera = getCameraById(cameras, activeCameraId);
   const [zonePolygon, setZonePolygon] = useState<ZonePolygon | null>(null);
+
+  // ── Component lifecycle ───────────────────────────────────────────────────
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (inferenceIntervalRef.current) {
+        clearInterval(inferenceIntervalRef.current);
+        inferenceIntervalRef.current = null;
+      }
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach(t => t.stop());
+        webcamStreamRef.current = null;
+      }
+    };
+  }, []);
 
   // ── Fetch active zones for camera ─────────────────────────────────────────
   useEffect(() => {
@@ -87,12 +118,21 @@ export const LiveSurveillancePage: React.FC = () => {
       webcamStreamRef.current.getTracks().forEach(track => track.stop());
       webcamStreamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    webcamActiveRef.current = false;
+    isInferenceInFlightRef.current = false;
+    inferenceTimestampsRef.current = [];
     setWebcamActive(false);
     setWebcamConnecting(false);
     setIsDetecting(false);
     setCameraError(null);
     setWebcamFPS(0);
+    setInferenceLatency(0);
     setPersonCount(0);
+    setVehicleCount(0);
+    setVehicleDetections([]);
     setRealDetections([]);
     setRealTracks([]);
     setWebcamStatus('NO HUMAN DETECTED');
@@ -107,11 +147,13 @@ export const LiveSurveillancePage: React.FC = () => {
   }, []);
 
   // ── Start Browser Webcam ──────────────────────────────────────────────────
-  // Stops any existing stream first, then requests a fresh one.
-  // Returns true if the stream was successfully started.
   const startWebcam = useCallback(async (): Promise<boolean> => {
+    if (webcamStreamRef.current && webcamActiveRef.current && videoRef.current && videoRef.current.srcObject) {
+      // Stream is already active — reuse it without stopping
+      return true;
+    }
+
     // Stop any existing interval and stream before requesting a new one
-    // (prevents duplicate streams / duplicate inference loops)
     if (inferenceIntervalRef.current) {
       clearInterval(inferenceIntervalRef.current);
       inferenceIntervalRef.current = null;
@@ -120,23 +162,26 @@ export const LiveSurveillancePage: React.FC = () => {
       webcamStreamRef.current.getTracks().forEach(t => t.stop());
       webcamStreamRef.current = null;
     }
+    webcamActiveRef.current = false;
+    isInferenceInFlightRef.current = false;
+    inferenceTimestampsRef.current = [];
     setWebcamActive(false);
     setWebcamConnecting(true);
     setCameraError(null);
-    // Reset stale values immediately so the UI doesn't show old data while connecting
-    setWebcamFPS(0);
-    setPersonCount(0);
-    setWebcamStatus('NO HUMAN DETECTED');
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return false;
+      }
       webcamStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.src = '';
         videoRef.current.play().catch(e => console.warn("Failed to autoplay webcam:", e));
       }
       setWebcamConnecting(false);
+      webcamActiveRef.current = true;
       setWebcamActive(true);
       return true;
     } catch (err: any) {
@@ -149,21 +194,29 @@ export const LiveSurveillancePage: React.FC = () => {
         setCameraError(`Camera access error: ${err.message || 'Unknown error'}`);
       }
       setWebcamConnecting(false);
+      webcamActiveRef.current = false;
       setWebcamActive(false);
       return false;
     }
   }, []);
 
+  // ── Ensure video element remains bound to webcamStreamRef across renders ──
+  useEffect(() => {
+    if (feedSource === 'WEBCAM' && webcamActive && videoRef.current && webcamStreamRef.current) {
+      if (videoRef.current.srcObject !== webcamStreamRef.current) {
+        videoRef.current.srcObject = webcamStreamRef.current;
+      }
+      videoRef.current.play().catch(() => {});
+    }
+  }, [feedSource, webcamActive]);
+
   // ── Sync feed source with selected camera protocol ──────────────────────
   useEffect(() => {
     if (activeCamera) {
-      if (activeCamera.protocol === 'WEBCAM') {
-        setFeedSource('WEBCAM');
-      } else {
-        setFeedSource('SIMULATED');
-      }
+      const targetSource = activeCamera.protocol === 'WEBCAM' ? 'WEBCAM' : 'SIMULATED';
+      setFeedSource(prev => prev === targetSource ? prev : targetSource);
     }
-  }, [activeCameraId, activeCamera]);
+  }, [activeCameraId, activeCamera.id, activeCamera.protocol]);
 
   // ── Handle Source Switch & Persistence ──────────────────────────────────────
   const handleSourceChange = async (val: 'SIMULATED' | 'WEBCAM') => {
@@ -173,7 +226,6 @@ export const LiveSurveillancePage: React.FC = () => {
       const type = val === 'WEBCAM' ? 'WEBCAM' : 'SIMULATED_FILE';
       const url = activeCamera.streamUrl || '';
       const res = await ibvapApi.updateCameraSource(activeCamera.id, url, type);
-      const verify = res.source_verification || {};
       
       const statusLower = res.status?.toLowerCase();
       updateCamera(activeCamera.id, {
@@ -188,22 +240,11 @@ export const LiveSurveillancePage: React.FC = () => {
   };
 
   // ── Monitor feed source and camera selector updates ────────────────────────
-  // This effect fires when the user switches camera/source, or when the
-  // component mounts (page navigation / browser refresh).
   useEffect(() => {
-    setRealDetections([]);
-    setRealTracks([]);
-    setPersonCount(0);
-    setWebcamStatus('NO HUMAN DETECTED');
-
     if (feedSource === 'WEBCAM') {
-      // Attempt to connect the webcam automatically.
-      // If the user previously started inference (activeCamera.autoStartInference === true),
-      // restart the inference loop once the stream is confirmed active.
       startWebcam().then(success => {
-        if (!success) return; // stream failed — error already shown
+        if (!success) return;
         if (activeCamera.autoStartInference) {
-          // Guard: only start one loop
           if (!inferenceIntervalRef.current) {
             setIsDetecting(true);
             inferenceIntervalRef.current = setInterval(() => {
@@ -213,31 +254,32 @@ export const LiveSurveillancePage: React.FC = () => {
         }
       });
     } else {
-      // Switching to simulated/uploaded — stop any active webcam
       stopWebcam();
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
+      if (activeCamera.autoStartInference && !isDetecting) {
+        if (videoRef.current && videoRef.current.paused) {
+           videoRef.current.play().catch(()=>{});
+        }
+        setIsDetecting(true);
+        inferenceIntervalRef.current = setInterval(() => {
+          if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+        }, 180);
+      }
     }
 
-    // Cleanup on unmount or before next effect run
     return () => {
+      // Clean up intervals on unmount / change
       if (inferenceIntervalRef.current) {
         clearInterval(inferenceIntervalRef.current);
         inferenceIntervalRef.current = null;
       }
-      if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(t => t.stop());
-        webcamStreamRef.current = null;
-      }
-      setWebcamActive(false);
-      setWebcamConnecting(false);
-      setIsDetecting(false);
     };
   }, [feedSource, activeCameraId, startWebcam, stopWebcam]);
 
   // ── Capture composite screenshot & Upload evidence ─────────────────────────
-  const captureAndUploadEvidence = useCallback((count: number, dets: any[]) => {
+  const captureAndUploadEvidence = useCallback((count: number, dets: any[], incidentId?: string) => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -265,14 +307,18 @@ export const LiveSurveillancePage: React.FC = () => {
       formData.append('camera_id', camId);
       formData.append('sector', activeCamera.sector);
       formData.append('timestamp', ts);
-      formData.append('event_type', 'MULTIPLE_PERSONS_DETECTED');
+      formData.append('event_type', 'UNKNOWN_PERSON_DETECTED');
       formData.append('person_count', String(count));
       formData.append('threat_level', 'critical');
       formData.append('confidence_values', dets.map(d => `${Math.round(d.confidence * 100)}%`).join(', '));
+      if (incidentId) {
+        formData.append('incident_id', incidentId);
+      }
 
       ibvapApi.uploadEvidence(formData)
         .then((res) => {
           console.log(`[IBVAP] Evidence uploaded successfully! Incident ID: ${res.incident_id}`);
+          setEvidenceUploaded(true);
         })
         .catch((e) => {
           console.error('[IBVAP] Failed to upload evidence:', e);
@@ -281,7 +327,7 @@ export const LiveSurveillancePage: React.FC = () => {
   }, [activeCamera]);
 
   // ── Draw bounding boxes on Canvas ──────────────────────────────────────────
-  const drawDetections = useCallback((dets: any[]) => {
+  const drawDetections = useCallback((dets: any[], vdets: any[] = []) => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
@@ -313,8 +359,7 @@ export const LiveSurveillancePage: React.FC = () => {
       ctx.restore();
     }
 
-    // 2. Draw red bounding boxes
-    const count = dets.length;
+    // 2. Draw person bounding boxes (red = unknown, green = known)
     dets.forEach((det: any, idx: number) => {
       const nb = det.bounding_box;
       if (!nb) return;
@@ -324,27 +369,122 @@ export const LiveSurveillancePage: React.FC = () => {
       const bw = nb.width * W;
       const bh = nb.height * H;
 
-      const conf = det.confidence || 0;
-      const label = `PERSON #${idx + 1}`;
-      const subLabel = `CONF: ${Math.round(conf * 100)}%`;
+      const yoloConf = det.confidence || 0;
+      const face = det.face;
+      const identityStatus: string = det.identity_status || face?.identity_status || (face?.recognized ? 'KNOWN' : (face ? 'UNKNOWN' : 'FACE_UNAVAILABLE'));
+
+      let line1 = det.track_id != null ? `TRK#${det.track_id}` : `PERSON #${idx + 1}`;
+      let line2 = 'FACE UNAVAILABLE';
+      let line3 = 'NO FACE';
+      let themeColor = '#64748B'; // Slate 500 for FACE_UNAVAILABLE
+
+      if (identityStatus === 'KNOWN') {
+        const confLevel = face?.confidence_level || face?.confidenceLevel || 'HIGH';
+        const recConf = face?.recognition_confidence ?? face?.confidence ?? 0;
+        const pName = (face?.name || det.person_name || 'KNOWN').toUpperCase();
+        line1 = `KNOWN · ${confLevel}`;
+        line2 = pName;
+        line3 = `CONF: ${Math.round(recConf * 100)}%`;
+        themeColor = '#10B981'; // Emerald 500
+      } else if (identityStatus === 'UNKNOWN') {
+        const recConf = face?.recognition_confidence ?? face?.confidence ?? 0;
+        line1 = `UNKNOWN · NO MATCH`;
+        line2 = 'NO MATCH';
+        line3 = recConf > 0 ? `CONF: ${Math.round(recConf * 100)}%` : `CONF: ${Math.round(yoloConf * 100)}%`;
+        themeColor = '#D92D20'; // Red 600 for confirmed UNKNOWN threat
+      } else if (identityStatus === 'FACE_PROCESSING_ERROR') {
+        line1 = 'FACE ERROR';
+        line2 = 'PROCESSING FAILED';
+        line3 = 'RETRY';
+        themeColor = '#F59E0B'; // Amber 500
+      } else {
+        // FACE_UNAVAILABLE (no face visible, turned away, occluded)
+        line1 = det.track_id != null ? `TRK#${det.track_id}` : `PERSON #${idx + 1}`;
+        line2 = 'FACE UNAVAILABLE';
+        line3 = 'NO FACE';
+        themeColor = '#64748B'; // Slate 500
+      }
 
       ctx.save();
-      // Draw red alert box
-      ctx.strokeStyle = count > 1 ? '#D92D20' : '#10B981'; // red for alert, green for normal
-      ctx.lineWidth = 2.5;
+      // Draw professional bounding box
+      ctx.strokeStyle = themeColor;
+      ctx.lineWidth = 2;
       ctx.strokeRect(bx, by, bw, bh);
 
-      // Label background
-      ctx.fillStyle = count > 1 ? 'rgba(217, 45, 32, 0.95)' : 'rgba(16, 185, 129, 0.95)';
-      const textWidth = Math.max(ctx.measureText(label).width, ctx.measureText(subLabel).width);
-      ctx.fillRect(bx, Math.max(0, by - 30), textWidth + 12, 30);
+      // Label background (Dark panel)
+      ctx.fillStyle = 'rgba(11, 31, 51, 0.9)'; // Dark navy background
+      const textWidth = Math.max(
+        ctx.measureText(line1).width,
+        ctx.measureText(line2).width,
+        ctx.measureText(line3).width
+      ) + 20; // Extra padding
+      const labelHeight = 40;
+      
+      // Draw label background slightly above the box
+      ctx.fillRect(bx, Math.max(0, by - labelHeight), textWidth, labelHeight);
+      
+      // Top color bar for the label
+      ctx.fillStyle = themeColor;
+      ctx.fillRect(bx, Math.max(0, by - labelHeight), textWidth, 3);
 
       // Label text
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 9px monospace';
-      ctx.fillText(label, bx + 6, Math.max(10, by - 18));
-      ctx.font = '8px monospace';
-      ctx.fillText(subLabel, bx + 6, Math.max(20, by - 8));
+      ctx.fillText(line1, bx + 6, Math.max(12, by - 25));
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = identityStatus === 'KNOWN' ? '#10B981' : (identityStatus === 'UNKNOWN' ? '#F87171' : '#F8FAFC');
+      ctx.fillText(line2, bx + 6, Math.max(24, by - 14));
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = '#94A3B8'; // Slate 400
+      ctx.fillText(line3, bx + 6, Math.max(34, by - 4));
+      
+      ctx.restore();
+    });
+
+    // 3. Draw vehicle bounding boxes — amber (#F59E0B), distinct from person overlays
+    vdets.forEach((det: any) => {
+      const nb = det.bounding_box;
+      if (!nb) return;
+      const bx = nb.x * W;
+      const by = nb.y * H;
+      const bw = nb.width * W;
+      const bh = nb.height * H;
+      if (bw < 2 || bh < 2) return;
+
+      const vClass = (det.vehicle_class || det.class || 'vehicle').toUpperCase();
+      const label = det.track_label || `VTRK#${det.track_id}`;
+      const conf = det.confidence || 0;
+      const dir = det.direction && det.direction !== 'unknown' ? ` · ${det.direction}` : '';
+
+      ctx.save();
+      ctx.strokeStyle = '#F59E0B'; // amber — IBVAP vehicle colour
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bx, by, bw, bh);
+
+      const line1v = `${label} · ${vClass}`;
+      const line2v = `CONF: ${Math.round(conf * 100)}%${dir}`;
+      const line3v = det.plate_text && det.plate_stable
+        ? `${det.plate_text} · ${Math.round((det.plate_confidence || 0) * 100)}% ${det.format_valid ? '(IND)' : ''}`
+        : 'PLATE NOT CONFIRMED';
+
+      ctx.fillStyle = 'rgba(11, 31, 51, 0.9)';
+      const tw = Math.max(
+        ctx.measureText(line1v).width,
+        ctx.measureText(line2v).width,
+        ctx.measureText(line3v).width
+      ) + 20;
+      const lh = 42;
+      ctx.fillRect(bx, Math.max(0, by - lh), tw, lh);
+      ctx.fillStyle = det.plate_stable ? (det.format_valid ? '#10B981' : '#F59E0B') : '#F59E0B';
+      ctx.fillRect(bx, Math.max(0, by - lh), tw, 3);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(line1v, bx + 6, Math.max(12, by - 28));
+      ctx.fillStyle = '#FDE68A';
+      ctx.fillText(line2v, bx + 6, Math.max(22, by - 16));
+      ctx.fillStyle = det.plate_stable ? (det.format_valid ? '#34D399' : '#FBBF24') : '#94A3B8';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(line3v, bx + 6, Math.max(34, by - 4));
       ctx.restore();
     });
   }, [zonePolygon]);
@@ -352,54 +492,112 @@ export const LiveSurveillancePage: React.FC = () => {
   // ── Run Real-Time Frame Inference (Webcam loop) ────────────────────────────
   const runFrameInference = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !webcamActive) return;
+    if (!video || !isMountedRef.current) return;
 
-    // Create temporary canvas to grab the current video frame
+    // Guard: video must have actual frame data and dimensions
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth === 0 || video.videoHeight === 0) {
+      return;
+    }
+
+    // Guard: skip if a previous request is still in-flight
+    if (isInferenceInFlightRef.current) return;
+
+    if (networkStatus === 'offline') {
+      if (!wasPausedForNetworkRef.current) {
+        console.log("[IBVAP] Live surveillance inference paused: backend OFFLINE");
+        wasPausedForNetworkRef.current = true;
+      }
+      return;
+    }
+
+    if (wasPausedForNetworkRef.current) {
+      console.log("[IBVAP] Live surveillance inference resumed: backend ONLINE");
+      wasPausedForNetworkRef.current = false;
+    }
+
+    // Mark in-flight immediately before async encoding
+    isInferenceInFlightRef.current = true;
+    const seq = ++seqCounterRef.current;
+    const isDebugLog = seq <= 3 || seq % 50 === 0;
+
+    if (isDebugLog) {
+      console.log(`[INFERENCE #${seq}] 1. tick | video=${video.videoWidth}x${video.videoHeight} readyState=${video.readyState}`);
+    }
+
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = video.videoWidth || 640;
-    tempCanvas.height = video.videoHeight || 480;
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
     const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
+    if (!tempCtx) {
+      isInferenceInFlightRef.current = false;
+      return;
+    }
 
     tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
 
     tempCanvas.toBlob(async (blob) => {
-      if (!blob) return;
+      if (!blob || blob.size < 100) {
+        if (isDebugLog) console.warn(`[INFERENCE #${seq}] Empty blob generated`);
+        isInferenceInFlightRef.current = false;
+        return;
+      }
+
+      if (isDebugLog) {
+        console.log(`[INFERENCE #${seq}] 2. blob generated: ${blob.size} bytes | dispatching detect-frame`);
+      }
+
       const startTime = performance.now();
       const camId = (activeCamera as any).camera_id || activeCamera.id;
 
       try {
-        const res = await ibvapApi.runWebcamInference(camId, blob, 0.35);
-        const latency = Math.round(performance.now() - startTime);
+        const res = await ibvapApi.runWebcamInference(camId, blob, 0.25);
+        if (!isMountedRef.current) return;
+
+        const now = performance.now();
+        const latency = Math.round(now - startTime);
         setInferenceLatency(latency);
-        setWebcamFPS(Math.round(1000 / (latency || 100)));
+
+        // Compute REAL rolling window inference FPS (5-second window)
+        inferenceTimestampsRef.current.push(now);
+        inferenceTimestampsRef.current = inferenceTimestampsRef.current.filter(t => now - t <= 5000);
+        const windowSec = Math.min(5, Math.max(1, (now - inferenceTimestampsRef.current[0]) / 1000));
+        const rollingFps = Math.max(1, Math.round(inferenceTimestampsRef.current.length / windowSec));
+        setWebcamFPS(rollingFps);
 
         const dets = res.detections || [];
         const count = dets.length;
         setPersonCount(count);
         setRealDetections(dets);
 
-        // Update real tracks array
+        const vdets = res.vehicle_detections || [];
+        setVehicleCount(vdets.length);
+        setVehicleDetections(vdets);
+
         setRealTracks(dets.map((d: any) => ({
-          track_id: d.track_id || Math.floor(Math.random() * 1000),
+          track_id: d.track_id != null ? d.track_id : Math.floor(Math.random() * 1000),
           confidence_max: d.confidence,
-          fine_class: d.class
+          fine_class: d.class,
+          face: d.face
         })));
 
         setLastDetectionTime(new Date().toLocaleTimeString());
 
-        // Decision logic
+        if (isDebugLog) {
+          console.log(`[INFERENCE #${seq}] 3. response: ${latency}ms | persons=${count} vehicles=${vdets.length} FPS=${rollingFps}`);
+        }
+
         const hasCreatedIncidents = (res.incidents_created_count || 0) > 0;
+        if (!hasCreatedIncidents) setEvidenceUploaded(false);
+
         if (hasCreatedIncidents) {
           setWebcamStatus('ALERT');
-          // Cooldown state machine for evidence screenshot
-          const now = Date.now();
-          if (!isAlertingRef.current || (now - lastAlertTimeRef.current > 30000)) {
+          const alertNow = Date.now();
+          if (!isAlertingRef.current || (alertNow - lastAlertTimeRef.current > 30000)) {
             isAlertingRef.current = true;
-            lastAlertTimeRef.current = now;
-            // Draw box on canvas immediately then take composite screenshot
-            drawDetections(dets);
-            setTimeout(() => captureAndUploadEvidence(count, dets), 100);
+            lastAlertTimeRef.current = alertNow;
+            drawDetections(dets, vdets);
+            const incId = (res.incident_ids && res.incident_ids.length > 0) ? res.incident_ids[0] : undefined;
+            setTimeout(() => captureAndUploadEvidence(count, dets, incId), 100);
           }
         } else if (count === 0) {
           setWebcamStatus('NO HUMAN DETECTED');
@@ -409,15 +607,14 @@ export const LiveSurveillancePage: React.FC = () => {
           isAlertingRef.current = false;
         }
 
-        // Draw overlay boxes
-        drawDetections(dets);
-
+        drawDetections(dets, vdets);
       } catch (err) {
-        console.warn('Frame inference failed:', err);
-        setWebcamFPS(0);
+        console.warn(`[INFERENCE #${seq}] Frame inference failed:`, err);
+      } finally {
+        isInferenceInFlightRef.current = false;
       }
-    }, 'image/jpeg');
-  }, [webcamActive, activeCamera, drawDetections, captureAndUploadEvidence]);
+    }, 'image/jpeg', 0.85);
+  }, [activeCamera, drawDetections, captureAndUploadEvidence, networkStatus]);
 
   // ── Fix Stale Closure for runFrameInference ───────────────────────────────
   const runFrameInferenceRef = useRef(runFrameInference);
@@ -442,6 +639,8 @@ export const LiveSurveillancePage: React.FC = () => {
       }
       setIsDetecting(false);
       setWebcamFPS(0);
+      setInferenceLatency(0);
+      inferenceTimestampsRef.current = [];
       // Clear detections overlay
       const canvas = canvasRef.current;
       if (canvas) {
@@ -453,37 +652,37 @@ export const LiveSurveillancePage: React.FC = () => {
       setPersonCount(0);
       setWebcamStatus('NO HUMAN DETECTED');
     } else {
-      if (feedSource !== 'WEBCAM') {
-        runRealYoloDetection();
+      // Record intent: if user explicitly starts inference, auto-resume it
+      // on next page load / refresh.
+      try {
+        await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, true);
+        updateCamera(activeCamera.id, { autoStartInference: true });
+      } catch (err) {
+        console.warn("Failed to persist auto-start preference in DB:", err);
+      }
+
+      const startLoop = () => {
+        // Guard: never run two loops simultaneously
+        if (inferenceIntervalRef.current) {
+          clearInterval(inferenceIntervalRef.current);
+        }
+        setIsDetecting(true);
+        // Interval ~180 ms ≈ 5.5 frames/s to keep CPU load controlled
+        inferenceIntervalRef.current = setInterval(() => {
+          if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+        }, 180);
+      };
+
+      if (feedSource === 'WEBCAM' && !webcamActive) {
+        startWebcam().then(success => {
+          if (success) startLoop();
+        });
       } else {
-        // Record intent: if user explicitly starts inference, auto-resume it
-        // on next page load / refresh as long as source remains WEBCAM.
-        try {
-          await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, true);
-          updateCamera(activeCamera.id, { autoStartInference: true });
-        } catch (err) {
-          console.warn("Failed to persist auto-start preference in DB:", err);
+        // Ensure the simulated/uploaded video is actually playing before starting inference
+        if (feedSource !== 'WEBCAM' && videoRef.current && videoRef.current.paused) {
+          videoRef.current.play().catch(() => {});
         }
-
-        const startLoop = () => {
-          // Guard: never run two loops simultaneously
-          if (inferenceIntervalRef.current) {
-            clearInterval(inferenceIntervalRef.current);
-          }
-          setIsDetecting(true);
-          // Interval ~180 ms ≈ 5.5 frames/s to keep CPU load controlled
-          inferenceIntervalRef.current = setInterval(() => {
-            if (runFrameInferenceRef.current) runFrameInferenceRef.current();
-          }, 180);
-        };
-
-        if (!webcamActive) {
-          startWebcam().then(success => {
-            if (success) startLoop();
-          });
-        } else {
-          startLoop();
-        }
+        startLoop();
       }
     }
   };
@@ -506,42 +705,8 @@ export const LiveSurveillancePage: React.FC = () => {
   }, []);
 
   // ── Animation Loop for Simulated/Uploaded Video Overlays ──────────────────
-  useEffect(() => {
-    if (feedSource === 'WEBCAM') return;
-    
-    let animFrame: number;
-    const loop = () => {
-      const video = videoRef.current;
-      if (video && realDetections.length > 0) {
-        const currentFrame = Math.round(video.currentTime * (activeCamera.fps || 30));
-        
-        let closestFrameIndex: number | null = null;
-        let minDiff = Infinity;
-        
-        realDetections.forEach((d) => {
-          const diff = Math.abs(d.frame_index - currentFrame);
-          if (diff < minDiff && diff <= 10) {
-            minDiff = diff;
-            closestFrameIndex = d.frame_index;
-          }
-        });
-        
-        const frameDets = closestFrameIndex !== null 
-          ? realDetections.filter(d => d.frame_index === closestFrameIndex)
-          : [];
-          
-        drawDetections(frameDets);
-        setPersonCount(frameDets.length);
-
-        const statusVal = frameDets.length === 0 ? 'NO HUMAN DETECTED' : (frameDets.length === 1 ? 'NORMAL' : 'ALERT');
-        setWebcamStatus(statusVal);
-      }
-      animFrame = requestAnimationFrame(loop);
-    };
-    
-    animFrame = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animFrame);
-  }, [feedSource, realDetections, activeCamera.fps, drawDetections]);
+  // Removed requestAnimationFrame batch synchronization.
+  // Bounding boxes are now rendered immediately upon the live frame HTTP response.
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -559,42 +724,21 @@ export const LiveSurveillancePage: React.FC = () => {
         const detectId = (activeCamera as any).camera_id || activeCamera.id;
         const uploadRes = await ibvapApi.uploadVideo(file, detectId);
         await ibvapApi.processCameraVideo(detectId, uploadRes.video_id);
-        await runRealYoloDetection();
+        
+        setIsDetecting(true);
+        if (inferenceIntervalRef.current) {
+          clearInterval(inferenceIntervalRef.current);
+        }
+        inferenceIntervalRef.current = setInterval(() => {
+          if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+        }, 180);
       } catch (err: any) {
         console.warn('Failed to upload MP4:', err);
       }
     }
   };
 
-  const runRealYoloDetection = async () => {
-    if (!activeCamera) return;
-    setIsDetecting(true);
-    try {
-      const detectId = (activeCamera as any).camera_id || activeCamera.id;
-      const data = await ibvapApi.runYoloDetection(detectId, {
-        confThreshold: 0.30,
-        frameStride: 2,
-        maxFrames: 150
-      });
-
-      if (data && data.detections) {
-        setRealDetections(data.detections);
-        setRealTracks(data.tracks || []);
-
-        const incCount = data.incidents_created_count || 0;
-        // Backend successfully evaluates rules and creates incidents directly in the database.
-        // The frontend will automatically load the canonical database record on its next poll interval,
-        // so we DO NOT call a frontend fake `addIncident` here.
-      } else {
-        setRealDetections([]);
-        setRealTracks([]);
-      }
-    } catch (err: any) {
-      console.warn('Real YOLO+ByteTrack detection error:', err);
-    } finally {
-      setIsDetecting(false);
-    }
-  };
+  // runRealYoloDetection was fully removed in favor of real-time runFrameInference.
 
   return (
     <div className="space-y-[24px]">
@@ -736,8 +880,8 @@ export const LiveSurveillancePage: React.FC = () => {
               <div className="flex items-center gap-2">
                 {webcamStatus === 'ALERT' ? <ShieldAlert className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
                 <span className="uppercase tracking-wide font-mono">
-                  {webcamStatus === 'ALERT' ? 'MULTIPLE PERSONS DETECTED — ALERT' :
-                   webcamStatus === 'NORMAL' ? '1 PERSON DETECTED — NORMAL' :
+                  {webcamStatus === 'ALERT' ? 'UNKNOWN PERSON DETECTED — ALERT' :
+                   (webcamStatus === 'NORMAL' && personCount > 0) ? `${personCount} PERSON${personCount !== 1 ? 'S' : ''} DETECTED — NORMAL` :
                    'NO HUMAN DETECTED'}
                 </span>
               </div>
@@ -803,14 +947,18 @@ export const LiveSurveillancePage: React.FC = () => {
                   </div>
                 </div>
 
-                {personCount >= 2 && (
+                {webcamStatus === 'ALERT' && (
                   <div>
                     <h3 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">Active Alerts</h3>
                     <div className="p-3 bg-red-50 border border-red-100 rounded flex items-start gap-3 animate-pulse">
                       <AlertTriangle className="w-5 h-5 text-[#D92D20] shrink-0 mt-0.5" />
                       <div>
-                        <div className="text-sm font-bold text-[#D92D20]">MULTIPLE PERSONS DETECTED</div>
-                        <div className="text-xs text-[#D92D20]/80 mt-1">Automatic evidence captured and logged. Threat level: ALERT.</div>
+                        <div className="text-sm font-bold text-[#D92D20]">UNKNOWN PERSON DETECTED</div>
+                        {evidenceUploaded ? (
+                          <div className="text-xs text-[#D92D20]/80 mt-1">Automatic evidence captured and logged. Threat level: ALERT.</div>
+                        ) : (
+                          <div className="text-xs text-[#D92D20]/80 mt-1">Capturing evidence... Threat level: ALERT.</div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -827,7 +975,18 @@ export const LiveSurveillancePage: React.FC = () => {
                     <div key={i} className="p-2.5 border border-slate-200 rounded flex justify-between items-center bg-slate-50 font-mono text-xs">
                       <div className="flex items-center gap-2">
                         <Crosshair className="w-4 h-4 text-[#1F5F8B]" />
-                        <span className="font-semibold capitalize text-slate-800">{d.class} #{i + 1}</span>
+                        <div className="flex flex-col">
+                          <span className="font-semibold capitalize text-slate-800">
+                            {d.class} {d.track_id != null ? `#TRK#${d.track_id}` : `#${i + 1}`}
+                          </span>
+                          {d.face && (
+                            <span className={`text-[10px] mt-0.5 ${d.face.recognized ? 'text-blue-600 font-semibold' : 'text-slate-400'}`}>
+                              {d.face.recognized
+                                ? `👤 KNOWN · ${d.face.confidence_level || d.face.confidenceLevel || 'HIGH'}: ${d.face.name} (${Math.round(d.face.confidence * 100)}%)`
+                                : '👤 UNKNOWN --'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span className="font-bold text-[#10B981]">{(d.confidence * 100).toFixed(0)}%</span>
                     </div>
@@ -851,11 +1010,19 @@ export const LiveSurveillancePage: React.FC = () => {
                         <span>CLASS: {t.fine_class}</span>
                         <span>STATUS: ACTIVE</span>
                       </div>
+                      {t.face && (
+                        <div className={`text-[10px] pt-1 border-t border-slate-100 font-semibold ${t.face.recognized ? 'text-blue-600' : 'text-slate-400'}`}>
+                          {t.face.recognized
+                            ? `👤 KNOWN · ${t.face.confidence_level || t.face.confidenceLevel || 'HIGH'}: ${t.face.name} (${Math.round(t.face.confidence * 100)}%)`
+                            : '👤 UNKNOWN --'}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
               </div>
             )}
+
 
             {activeTab === 'technical' && (
               <div className="space-y-3 text-xs font-mono bg-slate-50 p-4 rounded border border-slate-200 text-slate-700">

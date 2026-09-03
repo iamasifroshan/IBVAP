@@ -11,7 +11,8 @@ import {
   BarChart3, 
   Settings,
   Sparkles,
-  Zap
+  Zap,
+  UserCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PageId } from '../../types';
@@ -36,35 +37,31 @@ export const Sidebar: React.FC = () => {
 
   const navGroups: NavGroup[] = [
     {
-      title: 'Overview',
+      title: 'SIH Demonstration',
       items: [
         { id: 'command-overview', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
         { id: 'live-surveillance', label: 'Live Surveillance', icon: <Video className="w-5 h-5" /> },
+        { id: 'face-recognition', label: 'Known Persons', icon: <UserCheck className="w-5 h-5" /> },
         { id: 'incidents', label: 'Incidents', icon: <ShieldAlert className="w-5 h-5" />, badge: activeAlertCount > 0 ? activeAlertCount : undefined }
       ]
     },
     {
-      title: 'AI & Analysis',
+      title: 'System Health',
       items: [
-        { id: 'sentinel-query', label: 'Investigation', icon: <Search className="w-5 h-5" /> },
-        { id: 'enviro-vision', label: 'Environment Analysis', icon: <CloudFog className="w-5 h-5" /> },
-        { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-5 h-5" /> }
+        { id: 'system-verification', label: 'System Verification', icon: <Zap className="w-5 h-5" /> },
       ]
     },
     {
-      title: 'Operations',
+      title: 'Additional Modules',
       items: [
-        { id: 'edge-guard', label: 'Edge Operations', icon: <HardDrive className="w-5 h-5" />, badge: pendingSyncCount > 0 ? pendingSyncCount : undefined },
         { id: 'camera-management', label: 'Camera Management', icon: <Camera className="w-5 h-5" /> },
-        { id: 'virtual-fence', label: 'Zones & Virtual Fence', icon: <Maximize2 className="w-5 h-5" /> }
-      ]
-    },
-    {
-      title: 'System',
-      items: [
+        { id: 'virtual-fence', label: 'Zones & Virtual Fence', icon: <Maximize2 className="w-5 h-5" /> },
+        { id: 'sentinel-query', label: 'Investigation', icon: <Search className="w-5 h-5" /> },
+        { id: 'edge-guard', label: 'Edge Operations', icon: <HardDrive className="w-5 h-5" />, badge: pendingSyncCount > 0 ? pendingSyncCount : undefined },
+        { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-5 h-5" /> },
+        { id: 'enviro-vision', label: 'Environment Analysis', icon: <CloudFog className="w-5 h-5" /> },
         { id: 'ai-training-center', label: 'AI Training Center', icon: <Sparkles className="w-5 h-5" /> },
         { id: 'settings', label: 'System Settings', icon: <Settings className="w-5 h-5" /> },
-        { id: 'system-verification', label: 'System Verification', icon: <Zap className="w-5 h-5" /> }
       ]
     }
   ];

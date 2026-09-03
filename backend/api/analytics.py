@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database.db import get_db
 from database.models import IncidentModel, DetectionModel
 from ai.smart_alert import smart_alert_service
+from ai.tracker import track_registry
 from sqlalchemy import func
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
@@ -25,7 +26,10 @@ def get_analytics_summary(db: Session = Depends(get_db)):
     
     false_alarm_rate = smart_alert_service.calculate_false_alarm_reduction_rate(db)
     total_dets = db.query(DetectionModel).count()
-    
+
+    # Vehicle stats — real-time from in-memory TrackRegistry
+    vehicle_stats = track_registry.get_vehicle_stats_all_cameras()
+
     return {
         "totalIncidents": total,
         "criticalCount": critical,
@@ -38,5 +42,6 @@ def get_analytics_summary(db: Session = Depends(get_db)):
         "topSector": top_sector,
         "falseAlarmReductionRate": false_alarm_rate,
         "totalCandidateDetections": total_dets,
-        "filteredNoiseCount": max(0, total_dets - total)
+        "filteredNoiseCount": max(0, total_dets - total),
+        "vehicleStats": vehicle_stats,
     }

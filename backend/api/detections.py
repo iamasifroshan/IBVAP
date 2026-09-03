@@ -6,6 +6,7 @@ from typing import List, Optional
 import numpy as np
 import cv2
 import time
+import uuid
 from datetime import datetime
 
 logger = logging.getLogger("api.detections")
@@ -76,6 +77,7 @@ def run_yolo_detection_with_tracking(
                 frames_with_indices=frames_with_idx,
                 camera_id=cam.camera_id,
                 conf_threshold=conf_threshold,
+                db=db,
             )
         except Exception as err2:
             raise HTTPException(status_code=500, detail=f"YOLO+ByteTrack failure on live frames: {str(err2)}")
@@ -146,6 +148,7 @@ def run_yolo_detection_with_tracking(
                 conf_threshold=conf_threshold,
                 frame_stride=frame_stride,
                 max_frames=max_frames,
+                db=db,
             )
             human_count = sum(1 for d in results["detections"] if d.get("object_type") == "human")
             logger.info(f"[IVAP] Inference complete — frames={results['frames_analyzed']} total_detections={results['detections_count']} humans={human_count} elapsed={results['elapsed_sec']}s")
@@ -395,6 +398,7 @@ def get_all_detections(
         .all()
     )
     return [_detection_to_dict(d) for d in dets]
+_webcam_frame_counters = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,8 +414,9 @@ async def detect_single_frame(
 ):
     """
     Perform YOLO + ByteTrack inference on a single uploaded frame from live webcam feed.
-    Only returns detections of class 'person'.
-    Evaluates detections against camera's active zones.
+    Returns person detections (routed to face/incident pipeline) and vehicle detections
+    (routed to vehicle tracking only — vehicles NEVER create incidents).
+    Evaluates person detections against camera active zones.
     """
     # Moved lazy imports to module level
     
@@ -436,29 +441,139 @@ async def detect_single_frame(
         raw_detections = detector_instance.track_frame(frame, conf_threshold=conf_threshold)
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Inference failure: {str(err)}")
-        
+
+    from config import settings
+    from ai.tracker import track_registry
+    
+    counter = _webcam_frame_counters.get(camera_id, 0)
+    _webcam_frame_counters[camera_id] = counter + 1
+    current_ts = datetime.utcnow().timestamp()
+
+    # Check if there are any persons detected before running heavy Face Recognition
+    has_person = any(d.get("fine_class") == "person" or d.get("object_type") == "human" for d in raw_detections)
+    
+    face_results = []
+    if has_person:
+        if counter % settings.FACE_RECOGNITION_INTERVAL == 0:
+            try:
+                from services.face_recognition import face_recognition_service
+                face_results = face_recognition_service.recognize_faces(frame, db)
+            except Exception as fe:
+                logger.error(f"Face recognition failed in detect_single_frame: {fe}")
+
     # Filter to human/person class
     person_dets = []
+    active_ids_this_frame = []
+    used_face_indices = set()
+
     for d in raw_detections:
         if d.get("fine_class") == "person" or d.get("object_type") == "human":
             nb = d["bounding_box"]
+            tid = d.get("track_id")
+            if tid is not None:
+                active_ids_this_frame.append(tid)
+            
+            # Map face recognition to this person (1-to-1 matching)
+            det_face = None
+            px = nb["x"] * w
+            py = nb["y"] * h
+            pw = nb["width"] * w
+            ph = nb["height"] * h
+            
+            best_face_idx = None
+            best_face = None
+            for f_idx, face in enumerate(face_results):
+                if f_idx in used_face_indices:
+                    continue
+                xf, yf, wf, hf = face["bounding_box"]
+                fcx = xf + wf / 2
+                fcy = yf + hf / 2
+                if (px <= fcx <= px + pw) and (py <= fcy <= py + ph):
+                    best_face = face
+                    best_face_idx = f_idx
+                    break
+            
+            if best_face is not None and best_face_idx is not None:
+                used_face_indices.add(best_face_idx)
+                det_face = {
+                    "recognized": best_face.get("recognized", False),
+                    "person_id": best_face.get("person_id"),
+                    "name": best_face.get("name"),
+                    "identity_code": best_face.get("identity_code"),
+                    "confidence": best_face.get("confidence", 0.0),
+                    "recognition_confidence": best_face.get("recognition_confidence", best_face.get("confidence", 0.0)),
+                    "face_detection_confidence": best_face.get("face_detection_confidence", 0.0),
+                    "confidence_level": best_face.get("confidence_level", "UNKNOWN"),
+                    "identity_status": best_face.get("identity_status", "KNOWN" if best_face.get("recognized") else "UNKNOWN"),
+                    "bounding_box": best_face.get("bounding_box")
+                }
+            
+            if tid is not None:
+                track_registry.update_track(
+                    camera_id=camera_id,
+                    track_id=tid,
+                    fine_class=d.get("fine_class", "person"),
+                    object_type=d.get("object_type", "human"),
+                    confidence=d["confidence"],
+                    bounding_box=nb,
+                    frame_index=counter,
+                    video_ts=current_ts
+                )
+                t_rec = track_registry._get_camera_store(camera_id).get(tid)
+                if t_rec:
+                    t_rec.update_face_identity(det_face, settings.FACE_RECOGNITION_GRACE_PERIOD_FRAMES)
+                    nb = t_rec.bounding_box
+                    det_face = t_rec.face_info
+
+            identity_status = det_face.get("identity_status", "FACE_UNAVAILABLE") if det_face else "FACE_UNAVAILABLE"
+            face_detected = (identity_status != "FACE_UNAVAILABLE")
+
             person_dets.append({
                 "class": "person",
                 "confidence": d["confidence"],
-                "track_id": d.get("track_id"),
+                "track_id": tid,
                 "bounding_box": nb,
                 "bbox": {
                     "x": int(nb["x"] * w),
                     "y": int(nb["y"] * h),
                     "width": int(nb["width"] * w),
                     "height": int(nb["height"] * h)
-                }
+                },
+                "face_detected": face_detected,
+                "recognized": det_face.get("recognized", False) if det_face else False,
+                "person_name": det_face.get("name") if det_face else None,
+                "recognition_confidence": det_face.get("recognition_confidence", 0.0) if det_face else 0.0,
+                "face_detection_confidence": det_face.get("face_detection_confidence", 0.0) if det_face else 0.0,
+                "identity_status": identity_status,
+                "face": det_face
             })
             
+    track_registry.mark_lost(camera_id, active_ids_this_frame)
     # Run zone logic
     zones = db.query(ZoneModel).filter(
-        (ZoneModel.camera_id == cam.camera_id) | (ZoneModel.camera_id == cam.id)
+        (ZoneModel.camera_id == cam.camera_id) | (ZoneModel.camera_id == cam.id) | (ZoneModel.camera_id == None)
     ).all()
+    if not zones:
+        zones = db.query(ZoneModel).all()
+        
+    # Ensure there is a full-frame zone to evaluate "Unknown Person" anywhere in the frame
+    full_frame_zone = ZoneModel(
+        id=str(uuid.uuid4()),
+        camera_id=cam.camera_id,
+        name="Webcam Global Zone",
+        sector=cam.sector,
+        zone_type="restricted_fence",
+        polygon_coordinates=[
+            {"x": 0.0, "y": 0.0},
+            {"x": 100.0, "y": 0.0},
+            {"x": 100.0, "y": 100.0},
+            {"x": 0.0, "y": 100.0}
+        ],
+        severity="critical",
+        enabled=True,
+        human_detection=True
+    )
+    zones.append(full_frame_zone)
     
     fence_dets = []
     for d in person_dets:
@@ -467,7 +582,8 @@ async def detect_single_frame(
             "fine_class": "person",
             "object_type": "human",
             "confidence": d["confidence"],
-            "bounding_box": d["bounding_box"]
+            "bounding_box": d["bounding_box"],
+            "face": d.get("face")
         })
         
     created_incidents = []
@@ -481,12 +597,219 @@ async def detect_single_frame(
             db=db
         )
         
+    # ── Vehicle Detection Pipeline ─────────────────────────────────────────────
+    # Route vehicle classes through a completely separate pipeline.
+    # Vehicles NEVER enter: face recognition, SmartAlert, fence_engine, or incident creation.
+    from config import settings as _s
+    vehicle_dets_out = []
+    active_vehicle_ids_this_frame = []
+
+    for d in raw_detections:
+        fine = d.get("fine_class", "")
+        if fine not in _s.VEHICLE_CLASSES:
+            continue
+
+        conf_v = d.get("confidence", 0.0)
+        if conf_v < _s.VEHICLE_CONFIDENCE_THRESHOLD:
+            continue
+
+        nb = d["bounding_box"]
+        area = nb.get("width", 0) * nb.get("height", 0)
+        aspect = nb.get("width", 1) / max(nb.get("height", 1), 1e-6)
+
+        # Reject obviously invalid detections (noise, background blobs)
+        if area < _s.VEHICLE_MIN_BBOX_AREA:
+            continue
+        if aspect < _s.VEHICLE_MIN_ASPECT_RATIO:
+            continue
+
+        tid_v = d.get("track_id")
+
+        if tid_v is not None:
+            active_vehicle_ids_this_frame.append(tid_v)
+            track_registry.update_vehicle_track(
+                camera_id=camera_id,
+                track_id=tid_v,
+                fine_class=fine,
+                confidence=conf_v,
+                bounding_box=nb,
+                frame_index=counter,
+                video_ts=current_ts,
+                smoothing_window=_s.VEHICLE_CLASS_SMOOTHING_WINDOW,
+            )
+            vstore = track_registry._get_vehicle_camera_store(camera_id)
+            v_rec = vstore.get(tid_v)
+            if v_rec and v_rec.frames_seen >= _s.VEHICLE_MIN_FRAMES:
+                stable_nb = v_rec.bounding_box
+                
+                # ── ANPR Plate Recognition ──────────────────────────────────
+                if _s.ANPR_ENABLED:
+                    try:
+                        from ai.anpr_engine import anpr_engine
+                        vx1 = max(0, int(stable_nb["x"] * w))
+                        vy1 = max(0, int(stable_nb["y"] * h))
+                        vw_p = int(stable_nb["width"] * w)
+                        vh_p = int(stable_nb["height"] * h)
+                        vx2 = min(w, vx1 + vw_p)
+                        vy2 = min(h, vy1 + vh_p)
+
+                        v_crop = frame[vy1:vy2, vx1:vx2]
+                        if v_crop.size > 0:
+                            p_res = anpr_engine.detect_plate_region(v_crop)
+                            if p_res:
+                                p_crop, (px_rel, py_rel, pw_rel, ph_rel), p_score = p_res
+                                raw_ocr, norm_plate, ocr_conf = anpr_engine.run_ocr(p_crop)
+                                if norm_plate and ocr_conf >= _s.OCR_CONFIDENCE_THRESHOLD:
+                                    is_valid_fmt = anpr_engine.validate_indian_plate_format(norm_plate)
+                                    v_rec.update_vehicle_plate(raw_ocr, norm_plate, ocr_conf, is_valid_fmt)
+                    except Exception as anpr_err:
+                        logger.error(f"[ANPR] Plate processing failed for VTRK#{tid_v}: {anpr_err}")
+
+                # Save / Update ANPR Observation in Database if plate is stable
+                if v_rec.plate_text and v_rec.plate_stable:
+                    try:
+                        from database.models import ANPRObservationModel
+                        existing_obs = db.query(ANPRObservationModel).filter(
+                            ANPRObservationModel.camera_id == camera_id,
+                            ANPRObservationModel.vehicle_track_id == tid_v,
+                            ANPRObservationModel.plate_text == v_rec.plate_text
+                        ).first()
+
+                        now_dt = datetime.utcnow()
+                        if existing_obs:
+                            existing_obs.last_seen = now_dt
+                            existing_obs.direction = v_rec.compute_direction()
+                            existing_obs.confidence = v_rec.plate_confidence
+                            existing_obs.format_valid = v_rec.format_valid
+                            db.commit()
+                        else:
+                            new_anpr_id = f"ANPR-{uuid.uuid4().hex[:8].upper()}"
+                            obs = ANPRObservationModel(
+                                id=str(uuid.uuid4()),
+                                anpr_id=new_anpr_id,
+                                camera_id=camera_id,
+                                vehicle_track_id=tid_v,
+                                vehicle_track_label=f"VTRK#{tid_v}",
+                                vehicle_class=v_rec.vehicle_class or fine,
+                                plate_text=v_rec.plate_text,
+                                raw_ocr_text=v_rec.raw_ocr_text,
+                                confidence=v_rec.plate_confidence,
+                                format_valid=v_rec.format_valid,
+                                direction=v_rec.compute_direction(),
+                                first_seen=now_dt,
+                                last_seen=now_dt,
+                                created_at=now_dt
+                            )
+                            db.add(obs)
+                            db.commit()
+
+                            # Broadcast WebSocket ANPR Event
+                            try:
+                                from api.ws import broadcast_event_sync
+                                broadcast_event_sync("ANPR_PLATE_RECOGNIZED", {
+                                    "camera_id": camera_id,
+                                    "vehicle_track_id": tid_v,
+                                    "vehicle_track_label": f"VTRK#{tid_v}",
+                                    "vehicle_class": v_rec.vehicle_class or fine,
+                                    "plate_text": v_rec.plate_text,
+                                    "confidence": v_rec.plate_confidence,
+                                    "format_valid": v_rec.format_valid
+                                })
+                            except Exception:
+                                pass
+                    except Exception as db_anpr_err:
+                        logger.error(f"[ANPR] Database observation save failed: {db_anpr_err}")
+
+                vehicle_dets_out.append({
+                    "class": v_rec.vehicle_class or fine,
+                    "vehicle_class": v_rec.vehicle_class or fine,
+                    "object_type": "vehicle",
+                    "confidence": conf_v,
+                    "track_id": tid_v,
+                    "track_label": f"VTRK#{tid_v}",
+                    "bounding_box": stable_nb,
+                    "bbox": {
+                        "x": int(stable_nb["x"] * w),
+                        "y": int(stable_nb["y"] * h),
+                        "width": int(stable_nb["width"] * w),
+                        "height": int(stable_nb["height"] * h),
+                    },
+                    "direction": v_rec.compute_direction(),
+                    "frames_seen": v_rec.frames_seen,
+                    "plate_text": v_rec.plate_text,
+                    "raw_ocr_text": v_rec.raw_ocr_text,
+                    "plate_confidence": v_rec.plate_confidence,
+                    "format_valid": v_rec.format_valid,
+                    "plate_stable": v_rec.plate_stable,
+                })
+
+    track_registry.mark_vehicle_lost(camera_id, active_vehicle_ids_this_frame)
+
+    # Broadcast WebSocket event ONLY when vehicle count changes (not every frame)
+    _prev_v_count = getattr(detect_single_frame, "_prev_vehicle_counts", {})
+    prev_count = _prev_v_count.get(camera_id, -1)
+    if len(vehicle_dets_out) != prev_count:
+        _prev_v_count[camera_id] = len(vehicle_dets_out)
+        detect_single_frame._prev_vehicle_counts = _prev_v_count
+        if vehicle_dets_out:
+            try:
+                from api.ws import broadcast_event_sync
+                broadcast_event_sync("VEHICLE_DETECTED", {
+                    "camera_id": camera_id,
+                    "vehicle_count": len(vehicle_dets_out),
+                    "vehicles": [{"track_label": v["track_label"], "vehicle_class": v["vehicle_class"], "confidence": round(v["confidence"], 3)} for v in vehicle_dets_out],
+                })
+            except Exception:
+                pass
+
     return {
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "person_count": len(person_dets),
         "detections": person_dets,
-        "incidents_created_count": len(created_incidents)
+        "vehicle_count": len(vehicle_dets_out),
+        "vehicle_detections": vehicle_dets_out,
+        "incidents_created_count": len(created_incidents),
+        "incident_ids": [i.incident_id for i in created_incidents],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /cameras/{camera_id}/vehicles   — active vehicle tracks for a camera
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/cameras/{camera_id}/vehicles")
+def get_camera_vehicles(camera_id: str, db: Session = Depends(get_db)):
+    """
+    Return all active vehicle tracks for the specified camera.
+    Data comes from the in-memory TrackRegistry vehicle store — real-time state.
+    No hardcoded statistics.
+    """
+    cam = db.query(CameraModel).filter(
+        (CameraModel.camera_id == camera_id) | (CameraModel.id == camera_id)
+    ).first()
+    if not cam:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    resolved_id = cam.camera_id
+    return {
+        "camera_id": resolved_id,
+        "vehicles": track_registry.get_active_vehicle_tracks(resolved_id),
+        "vehicle_count": len(track_registry.get_active_vehicle_tracks(resolved_id)),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /vehicles/stats   — aggregate vehicle counts across all cameras
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/vehicles/stats")
+def get_vehicle_stats():
+    """
+    Return aggregate vehicle statistics across all cameras.
+    Source: in-memory TrackRegistry vehicle store (real-time).
+    Returns zero counts when no vehicles are detected — never fabricates numbers.
+    """
+    return track_registry.get_vehicle_stats_all_cameras()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -509,6 +832,7 @@ def _track_to_dict(t: TrackModel) -> dict:
         "frames_seen": t.frames_seen,
         "video_ts_first_sec": t.video_ts_first_sec,
         "video_ts_last_sec": t.video_ts_last_sec,
+        "face": t.face,
         "created_at": t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else None,
     }
 
@@ -524,5 +848,6 @@ def _detection_to_dict(d: DetectionModel) -> dict:
         "frame_index": d.frame_index,
         "timestamp_sec": d.timestamp_sec,
         "bounding_box": d.bounding_box,
+        "face": d.face,
         "timestamp": d.timestamp.strftime("%Y-%m-%d %H:%M:%S") if d.timestamp else None,
     }

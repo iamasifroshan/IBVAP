@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import uuid
 import os
 import shutil
@@ -162,6 +162,7 @@ def upload_webcam_evidence(
     event_type: str = Form(...),
     person_count: int = Form(...),
     threat_level: str = Form(...),
+    incident_id: Optional[str] = Form(None),
     confidence_values: str = Form(""),
     db: Session = Depends(get_db)
 ):
@@ -178,39 +179,19 @@ def upload_webcam_evidence(
     with open(dest_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    inc_id_str = f"INC-WEBCAM-{inc_uuid[:8].upper()}"
-    
-    # Create incident
-    db_inc = IncidentModel(
-        id=inc_uuid,
-        incident_id=inc_id_str,
-        camera_id=camera_id,
-        camera_name=camera_id,
-        sector=sector,
-        outpost="Border Outpost North",
-        object_type="human",
-        track_id="MULTIPLE-TRACK",
-        event_type=event_type,
-        threat_score=85 if threat_level == "high" else 95 if threat_level == "critical" else 65,
-        threat_level=threat_level,
-        threat_factors=[{"category": "WEBCAM_BREACH", "scoreContribution": 50, "description": f"Multiple persons ({person_count}) detected"}],
-        explainable_reason=f"{person_count} persons detected on webcam. Live Alert.",
-        environment="normal",
-        ai_reliability=95,
-        visibility_score=90,
-        status="active",
-        sync_status="unsynced",
-        snapshot_url=f"/storage/evidence/{filename}",
-        zone_name="Webcam Zone",
-        loitering_duration_sec=0,
-        speed_kmh=0.0,
-        direction="Inward",
-        smart_alert_confirmed=True,
-        validation_checks={"rule": "Multiple Persons Alert"},
-        synced_to_cloud=False,
-        timestamp=datetime.utcnow()
-    )
-    db.add(db_inc)
+    db_inc = None
+    if incident_id:
+        db_inc = db.query(IncidentModel).filter(
+            (IncidentModel.incident_id == incident_id) | (IncidentModel.id == incident_id)
+        ).first()
+
+    if not db_inc:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        raise HTTPException(status_code=400, detail="Real incident_id is required. Cannot attach evidence to a missing incident.")
+        
+    inc_id_str = db_inc.incident_id
+    db_inc.snapshot_url = f"/storage/evidence/{filename}"
     
     # Create evidence record
     db_ev = EvidenceModel(
@@ -237,7 +218,8 @@ def upload_webcam_evidence(
         "threat_level": db_inc.threat_level,
         "zone_name": db_inc.zone_name,
         "explainable_reason": db_inc.explainable_reason,
-        "timestamp": db_inc.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": db_inc.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        "snapshot_url": db_inc.snapshot_url
     }
     broadcast_event_sync("incident_event", inc_data)
     

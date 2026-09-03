@@ -1,5 +1,7 @@
 import sys
 import os
+import time
+import psutil
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,10 +23,9 @@ from api.edge import router as edge_router
 from api.search import router as search_router
 from api.analytics import router as analytics_router
 from api.training import router as training_router
-from api.analytics import router as analytics_router
-from api.search import router as search_router
-from api.training import router as training_router
 from api.ws import router as ws_router
+from api.faces import router as faces_router
+from api.anpr import router as anpr_router
 
 # Initial DB Seeder: seed sample cameras
 def seed_db():
@@ -38,10 +39,10 @@ def seed_db():
             base_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(base_dir)
             
-            video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp(1).mp4")
-            video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp(1).mp4")
-            video_3 = os.path.join(base_dir, "storage", "videos", "12522257-hd_1920_1080_24fps(1).mp4")
-            video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps(1).mp4")
+            video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp.mp4")
+            video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp.mp4")
+            video_3 = os.path.join(base_dir, "storage", "videos", "12522257-hd_1920_1080_24fps.mp4")
+            video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps.mp4")
 
             # Create or update cameras
             cameras_data = [
@@ -197,6 +198,7 @@ def seed_db():
         db.close()
 
 is_backend_ready = False
+START_TIME = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -208,7 +210,7 @@ async def lifespan(app: FastAPI):
         # Test DB connectivity
         with engine.connect() as conn:
             pass
-        print("[STARTUP] Database connected")
+        print("[STARTUP] DATABASE: Connected")
         
         # Initialize DB tables automatically on startup
         Base.metadata.create_all(bind=engine)
@@ -223,9 +225,29 @@ async def lifespan(app: FastAPI):
         ev_count = db.query(EvidenceModel).count()
         db.close()
         
-        print(f"[STARTUP] Cameras found: {cam_count}")
-        print(f"[STARTUP] Incidents found: {inc_count}")
-        print(f"[STARTUP] Evidence found: {ev_count}")
+        print(f"[STARTUP] CAMERAS: Loaded {cam_count}")
+        print(f"[STARTUP] Incidents loaded: {inc_count}")
+        print(f"[STARTUP] Evidence loaded: {ev_count}")
+        
+        # Initialize AI Models
+        print("[STARTUP] AI model initialization starting")
+        try:
+            from ai.detector import detector_instance
+            detector_instance.load_model()
+            print("[STARTUP] YOLO: READY")
+        except Exception as e:
+            print(f"[STARTUP] YOLO: ERROR ({e})")
+            
+        try:
+            from services.face_recognition import face_recognition_service
+            face_recognition_service.load_models()
+            print("[STARTUP] YuNet: READY")
+            print("[STARTUP] SFace: READY")
+        except Exception as e:
+            print(f"[STARTUP] YuNet: ERROR ({e})")
+            print(f"[STARTUP] SFace: ERROR ({e})")
+            
+        print("[STARTUP] WEBSOCKET: Ready")
         print("[STARTUP] Storage verified")
         print("[STARTUP] API ready")
         
@@ -249,6 +271,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges"]
 )
 
 from fastapi.staticfiles import StaticFiles
@@ -261,27 +284,89 @@ VIDEOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage",
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="video_storage")
 
+FACES_DIR = settings.FACE_STORAGE_DIR
+os.makedirs(FACES_DIR, exist_ok=True)
+app.mount("/storage/faces", StaticFiles(directory=FACES_DIR), name="faces_storage")
+
 # Health check endpoint
 @app.get("/health", tags=["Health"])
 def health_check():
-    db_status = "connected"
+    db_status = "healthy"
     try:
         with engine.connect() as conn:
             pass
     except Exception:
-        db_status = "disconnected"
+        db_status = "error"
         
-    status = "healthy" if is_backend_ready and db_status == "connected" else "initializing"
+    status = "healthy" if is_backend_ready and db_status == "healthy" else "degraded"
     if not is_backend_ready:
-        status = "initializing"
+        status = "offline"
+        
+    # Cameras
+    db = SessionLocal()
+    total_cameras = 0
+    online_cameras = 0
+    offline_cameras = 0
+    try:
+        cams = db.query(CameraModel).all()
+        total_cameras = len(cams)
+        for c in cams:
+            if c.status in ["online", "connecting"]:
+                online_cameras += 1
+            else:
+                offline_cameras += 1
+    except Exception:
+        pass
+    finally:
+        db.close()
+        
+    # AI Models
+    try:
+        from ai.detector import detector_instance
+        yolo_status = "READY" if getattr(detector_instance, "_is_loaded", False) else "NOT_READY"
+    except Exception:
+        yolo_status = "ERROR"
+        
+    try:
+        from services.face_recognition import face_recognition_service
+        initialized = getattr(face_recognition_service, "initialized", False)
+        yunet_status = "READY" if initialized else "NOT_READY"
+        sface_status = "READY" if initialized else "NOT_READY"
+    except Exception:
+        yunet_status = "ERROR"
+        sface_status = "ERROR"
+        
+    ai_overall = "READY" if (yolo_status == "READY" and yunet_status == "READY") else "DEGRADED"
+        
+    # Runtime
+    uptime = int(time.time() - START_TIME)
+    try:
+        process = psutil.Process(os.getpid())
+        memory_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+    except Exception:
+        memory_mb = 0.0
         
     return {
         "status": status,
         "service": "IBVAP Backend",
         "database": db_status,
-        "database_path": settings.DATABASE_URL,
         "storage": "verified" if is_backend_ready else "unknown",
-        "ready": is_backend_ready
+        "ready": is_backend_ready,
+        "cameras": {
+            "total": total_cameras,
+            "online": online_cameras,
+            "offline": offline_cameras
+        },
+        "ai_subsystems": {
+            "overall": ai_overall,
+            "yolo": yolo_status,
+            "yunet": yunet_status,
+            "sface": sface_status
+        },
+        "runtime": {
+            "uptime_seconds": uptime,
+            "memory_mb": memory_mb
+        }
     }
 
 # Mount Routers under both /api/v1 and /api for full compatibility
@@ -297,9 +382,8 @@ for prefix in ["/api/v1", "/api"]:
     app.include_router(search_router, prefix=prefix)
     app.include_router(analytics_router, prefix=prefix)
     app.include_router(training_router, prefix=prefix)
-    app.include_router(analytics_router, prefix=prefix)
-    app.include_router(search_router, prefix=prefix)
-    app.include_router(training_router, prefix=prefix)
+    app.include_router(faces_router, prefix=prefix)
+    app.include_router(anpr_router, prefix=prefix)
 
 # Mount WebSocket router
 app.include_router(ws_router)

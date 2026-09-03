@@ -15,6 +15,7 @@ import { AnalyticsPage } from '../pages/AnalyticsPage';
 import { SystemSettingsPage } from '../pages/SystemSettingsPage';
 import { SystemVerificationPage } from '../pages/SystemVerificationPage';
 import { TrainingCenterPage } from '../pages/TrainingCenterPage';
+import { FaceRecognitionPage } from '../pages/FaceRecognitionPage';
 import { EvidenceModal } from '../common/EvidenceModal';
 import { ExplainableThreatModal } from '../common/ExplainableThreatModal';
 
@@ -53,6 +54,8 @@ export const AppLayout: React.FC = () => {
         return <SystemVerificationPage />;
       case 'ai-training-center':
         return <TrainingCenterPage />;
+      case 'face-recognition':
+        return <FaceRecognitionPage />;
       default:
         return <CommandOverviewPage />;
     }

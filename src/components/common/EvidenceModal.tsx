@@ -230,17 +230,7 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                     </span>
                   </div>
 
-                  {/* Second person bounding box (if multiple) */}
-                  {personCount >= 2 && (
-                    <div className="absolute top-[18%] right-[18%] w-[110px] h-[160px] border-2 border-red-500 bg-red-500/5 rounded-sm pointer-events-none flex flex-col justify-between p-1">
-                      <span className="bg-red-600 text-white text-[9px] font-mono px-1.5 py-0.5 font-bold self-start rounded-sm shadow uppercase leading-tight">
-                        PERSON #02
-                      </span>
-                      <span className="bg-black/80 text-white text-[9px] font-mono px-1.5 py-0.5 self-end rounded-sm leading-tight">
-                        CONF: 91%
-                      </span>
-                    </div>
-                  )}
+
 
                   {/* Cyan restricted zone fence */}
                   <div
@@ -345,8 +335,13 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                     { label: 'Camera', value: incident.cameraName, mono: true },
                     { label: 'Sector', value: incident.sector },
                     { label: 'Restricted Zone', value: incident.zoneName },
-                    { label: 'Detected Objects', value: `${personCount} Person${personCount !== 1 ? 's' : ''}`, highlight: personCount >= 2 },
-                    { label: 'Detection Type', value: personCount >= 2 ? 'Multiple Human Detection' : 'Single Human Detection' },
+                    { label: 'Detected Objects', value: `${personCount} Person${personCount !== 1 ? 's' : ''}`, highlight: false },
+                    { label: 'Detection Type', value: incident.explainableReason?.includes('UNKNOWN PERSON') ? 'Unknown Person' : 'Human Detection' },
+                    { label: 'Person', value: incident.personName || incident.person_name || 'UNKNOWN' },
+                    { label: 'Face', value: (incident.faceRecognized ?? incident.face_recognized) ? 'KNOWN' : 'UNKNOWN' },
+                    ...((incident.faceRecognized ?? incident.face_recognized) ? [
+                      { label: 'Confidence', value: `${Math.round((incident.faceConfidence ?? incident.face_confidence ?? 0) * 100)}%` }
+                    ] : [])
                   ].map((row, i) => (
                     <div key={i} className="flex justify-between items-center">
                       <span className="text-[13px] text-slate-400 font-medium">{row.label}</span>

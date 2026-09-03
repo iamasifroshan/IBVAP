@@ -4,7 +4,8 @@ import {
   Check,
   X,
   Activity,
-  ShieldCheck
+  ShieldCheck,
+  Car
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { evaluateSmartAlert } from '../../services/smartAlertEngine';
@@ -234,6 +235,108 @@ export const AnalyticsPage: React.FC = () => {
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div className="bg-[#1F5F8B] h-full w-[5.2%]"></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. VEHICLE INTELLIGENCE */}
+      <div className="bg-white border border-[#F59E0B]/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#F59E0B]/20 flex items-center gap-3">
+          <div className="p-2 rounded bg-[#F59E0B]/10">
+            <Car className="w-5 h-5 text-[#F59E0B]" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-[var(--primary-navy)] uppercase tracking-wider">Vehicle Intelligence</h2>
+            <p className="text-[12px] text-[var(--text-muted)] mt-0.5">Real-time from TrackRegistry — zero hardcoded counts</p>
+          </div>
+          <span className="ml-auto text-[11px] font-bold px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded">
+            {summary?.vehicleStats?.total ?? 0} ACTIVE
+          </span>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Class breakdown */}
+            <div>
+              <h3 className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-4">Class Breakdown</h3>
+              <div className="space-y-3">
+                {([
+                  { label: 'Car', key: 'car', color: '#F59E0B' },
+                  { label: 'Truck', key: 'truck', color: '#D97706' },
+                  { label: 'Motorcycle', key: 'motorcycle', color: '#B45309' },
+                  { label: 'Bus', key: 'bus', color: '#92400E' },
+                ] as const).map(({ label, key, color }) => {
+                  const count = summary?.vehicleStats?.[key] ?? 0;
+                  const total = summary?.vehicleStats?.total || 1;
+                  const pct = Math.round((count / total) * 100);
+                  return (
+                    <div key={key}>
+                      <div className="flex justify-between mb-1">
+                        <span className="text-[13px] font-medium text-[var(--text-primary)]">{label}</span>
+                        <span className="text-[13px] font-bold" style={{ color }}>{count} ({pct}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Status + operational note */}
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <h3 className="text-[11px] font-bold text-amber-800 uppercase tracking-widest mb-3">Pipeline Status</h3>
+                <ul className="space-y-2 text-[12px] text-amber-900">
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> Vehicles use ONE inference pass (shared YOLO call)</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> VTRK# namespace separate from TRK# (person)</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> Class smoothing: majority vote over 7-frame window</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> Vehicles never enter SmartAlert / incident logic</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> Direction tracked from centre-history displacement</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" /> Bbox validation: area ≥ 0.0008, aspect ratio ≥ 0.15</li>
+                </ul>
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                Vehicle counts update every 4 seconds from the live TrackRegistry.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. ANPR INTELLIGENCE */}
+      <div className="bg-white border border-[#10B981]/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#10B981]/20 flex items-center gap-3">
+          <div className="p-2 rounded bg-[#10B981]/10">
+            <ShieldCheck className="w-5 h-5 text-[#10B981]" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-[var(--primary-navy)] uppercase tracking-wider">ANPR Intelligence & License Plate Analytics</h2>
+            <p className="text-[12px] text-[var(--text-muted)] mt-0.5">Real-time number plate observations bound to VTRK# tracks</p>
+          </div>
+          <span className="ml-auto text-[11px] font-bold px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
+            OBSERVATION SYSTEM ACTIVE
+          </span>
+        </div>
+        <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Plate Stabilization</span>
+              <p className="text-[12px] text-slate-700 mt-2 leading-relaxed">
+                Temporal sliding window (5 frames) enforces majority vote & confidence weighting. Prevents single-frame OCR flicker.
+              </p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Indian RTO Validation</span>
+              <p className="text-[12px] text-slate-700 mt-2 leading-relaxed">
+                Syntax validator evaluates standard RTO (e.g. KA01AB1234), BH series, and Military plates without altering raw OCR strings.
+              </p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Zero Incident Guarantee</span>
+              <p className="text-[12px] text-slate-700 mt-2 leading-relaxed">
+                ANPR functions strictly as observation intelligence. Creates 0 IncidentModel and 0 EvidenceModel database records.
+              </p>
             </div>
           </div>
         </div>

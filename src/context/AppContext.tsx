@@ -35,11 +35,15 @@ interface AppContextType {
   updateCamera: (id: string, patch: Partial<Camera>) => void;
   addIncident: (incident: Partial<Incident>) => void;
   currentTimeStr: string;
+  knownPersonsCount: number;
+  setKnownPersonsCount: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEYS = {
+  ACTIVE_PAGE: 'ibvap_active_page',
+  ACTIVE_CAMERA_ID: 'ibvap_active_camera_id',
   INCIDENTS: 'ibvap_incidents',
   SYNC_QUEUE: 'ibvap_sync_queue',
   NETWORK_STATUS: 'ibvap_network_status',
@@ -48,7 +52,15 @@ const LOCAL_STORAGE_KEYS = {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activePage, setActivePage] = useState<PageId>('command-overview');
+  const [activePage, setActivePageState] = useState<PageId>(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE);
+    return (saved as PageId) || 'command-overview';
+  });
+
+  const setActivePage = (page: PageId) => {
+    setActivePageState(page);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE, page);
+  };
 
   // Load persistent state from localStorage if available
   const [networkStatus, setNetworkStatusState] = useState<NetworkStatus>(() => {
@@ -93,10 +105,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [explainableIncident, setExplainableIncident] = useState<Incident | null>(null);
-  const [activeCameraId, setActiveCameraId] = useState<string>('BORDER-CAM-07');
+  const [activeCameraId, setActiveCameraIdState] = useState<string>(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.ACTIVE_CAMERA_ID);
+    return saved || 'BORDER-CAM-07';
+  });
+
+  const setActiveCameraId = (id: string) => {
+    setActiveCameraIdState(id);
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_CAMERA_ID, id);
+  };
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [knownPersonsCount, setKnownPersonsCount] = useState<number>(0);
 
   // Save changes to localStorage for persistent state across refreshes & navigation
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE, activePage);
+  }, [activePage]);
+
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_CAMERA_ID, activeCameraId);
+  }, [activeCameraId]);
+
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEYS.CAMERAS, JSON.stringify(cameras));
   }, [cameras]);
@@ -138,7 +167,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let isComponentMounted = true;
     let backoffDelay = 2000;
     const MAX_BACKOFF = 30000;
+    let wsReconnectTimeout: ReturnType<typeof setTimeout>;
+    let wsBackoffDelay = 2000;
     let localNetworkStatus = 'offline';
+    let hasEverConnected = false;
 
     const loadBackendData = async () => {
       try {
@@ -168,6 +200,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return Array.from(mergedMap.values());
           });
         }
+
+        // Fail-safe load of registered people count
+        try {
+          const livePeople = await ibvapApi.listRegisteredPeople();
+          if (livePeople) {
+            setKnownPersonsCount(livePeople.length);
+          }
+        } catch (faceErr) {
+          console.warn("Failed to load registered people count:", faceErr);
+        }
       } catch (err) {
         console.warn("Failed to load backend data:", err);
         // DO NOT overwrite state with mock data or empty arrays here.
@@ -187,7 +229,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1';
         const healthUrl = API_BASE_URL.replace(/\/api\/v1\/?$/, '/health');
         
-        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const res = await fetch(healthUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
         if (!res.ok) throw new Error("Health check failed");
         
         const healthData = await res.json();
@@ -196,6 +243,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // Backend is ready
           backoffDelay = 2000; // reset backoff
           if (localNetworkStatus !== 'online') {
+            console.log("[IBVAP] Backend health restored. Status: ONLINE");
+            hasEverConnected = true;
             await loadBackendData();
             setNetworkStatusState('online');
             localNetworkStatus = 'online';
@@ -212,13 +261,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           pollTimeout = setTimeout(checkHealthAndConnect, 3000);
         }
       } catch (err) {
-        setNetworkStatusState('offline');
-        localNetworkStatus = 'offline';
-        if (ws) {
-           ws.close();
-           ws = null;
+        if (!hasEverConnected) {
+          if (localNetworkStatus !== 'connecting') {
+            setNetworkStatusState('connecting');
+            localNetworkStatus = 'connecting';
+          }
+        } else {
+          if (localNetworkStatus !== 'offline') {
+            console.warn("[IBVAP] Backend health check failed. Status: OFFLINE");
+          }
+          setNetworkStatusState('offline');
+          localNetworkStatus = 'offline';
+          if (ws) {
+            ws.close();
+            ws = null;
+          }
         }
-        // Exponential backoff
         backoffDelay = Math.min(backoffDelay * 1.5, MAX_BACKOFF);
         pollTimeout = setTimeout(checkHealthAndConnect, backoffDelay);
       }
@@ -231,6 +289,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       ws.onopen = () => {
         // WS connected, but we rely on health check for 'online' status
+        console.log("[IBVAP] WebSocket connected successfully.");
+        wsBackoffDelay = 2000;
       };
 
       ws.onmessage = (event) => {
@@ -246,6 +306,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       ws.onclose = () => {
         ws = null;
+        if (isComponentMounted && localNetworkStatus === 'online') {
+          console.log(`[IBVAP] WebSocket disconnected. Attempting reconnect in ${wsBackoffDelay}ms...`);
+          clearTimeout(wsReconnectTimeout);
+          wsReconnectTimeout = setTimeout(() => {
+            wsBackoffDelay = Math.min(wsBackoffDelay * 1.5, 30000);
+            connectWebSocket();
+          }, wsBackoffDelay);
+        }
       };
 
       ws.onerror = () => {
@@ -259,6 +327,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isComponentMounted = false;
       if (ws) ws.close();
       clearTimeout(pollTimeout);
+      clearTimeout(wsReconnectTimeout);
     };
   }, []);
 
@@ -316,7 +385,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Step 4: Mark incidents as synced to cloud
     const pendingIncIds = new Set(pendingItems.map(i => i.incidentId));
     setIncidents(prev => prev.map(inc =>
-      (pendingIncIds.has(inc.incidentId) || pendingIncIds.has(inc.id))
+      (pendingIncIds.has(inc.id))
         ? { ...inc, syncedToCloud: true, syncedTimestamp: nowUtcStr, status: inc.status }
         : inc
     ));
@@ -426,7 +495,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateIncidentStatus,
       updateCamera,
       addIncident,
-      currentTimeStr
+      currentTimeStr,
+      knownPersonsCount,
+      setKnownPersonsCount
     }}>
       {children}
     </AppContext.Provider>

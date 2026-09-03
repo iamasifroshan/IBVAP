@@ -238,21 +238,23 @@ class YoloDetector:
         conf_threshold: float = 0.35,
         frame_stride: int = 2,
         max_frames: int = 150,
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
-        Process an MP4 video file with real ByteTrack multi-object tracking.
+        Process an MP4 video file with real ByteTrack multi-object tracking and Face Recognition.
 
         Pipeline:
           OpenCV VideoCapture
           → frame-by-frame
           → YOLO + ByteTrack (persist=True)
           → real integer Track IDs assigned
+          → Face Recognition executed on interval & mapped via track_to_identity
           → TrackRegistry updated (new / active / lost)
           → all detections + track summaries returned
 
         Returns:
-          detections: raw per-frame detections with track_id
-          tracks: summarised track records with lifecycle state
+          detections: raw per-frame detections with track_id and face metadata
+          tracks: summarised track records with lifecycle state and face metadata
         """
         from ai.tracker import track_registry, TrackState
 
@@ -270,56 +272,156 @@ class YoloDetector:
         self.model.predictor = None  # force tracker re-init so IDs start fresh
         track_registry.clear_camera(camera_id)
 
-        all_detections: List[Dict[str, Any]] = []
+        track_to_identity = {}
+        from config import settings
+
         processed_count = 0
         frame_index = 0
+        all_detections = []
         start_time = time.time()
+        reconnect_attempts = 0
 
-        while cap.isOpened() and frame_index < total_frames and processed_count < max_frames:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                break
+        try:
+            while frame_index < total_frames and processed_count < max_frames:
+                ret, frame = False, None
+                try:
+                    if cap.isOpened():
+                        ret, frame = cap.read()
+                except Exception as e:
+                    logger.error(f"[CAMERA] Exception reading frame: {e}")
 
-            if frame_index % frame_stride == 0:
-                timestamp_sec = round(frame_index / fps, 2)
-                frame_dets = self.track_frame(frame, conf_threshold=conf_threshold)
+                if not ret or frame is None:
+                    if getattr(settings, "CAMERA_RECONNECT_ENABLED", False) and reconnect_attempts < getattr(settings, "CAMERA_RECONNECT_MAX_RETRIES", 5):
+                        logger.warning(f"[CAMERA] Stream lost: {resolved_path}")
+                        cap.release()
+                        reconnect_attempts += 1
+                        max_ret = getattr(settings, 'CAMERA_RECONNECT_MAX_RETRIES', 5)
+                        logger.info(f"[CAMERA] Reconnecting... attempt {reconnect_attempts}/{max_ret}")
+                        time.sleep(getattr(settings, "CAMERA_RECONNECT_DELAY_SECONDS", 2.0))
+                        
+                        cap = cv2.VideoCapture(resolved_path)
+                        if cap.isOpened():
+                            logger.info(f"[CAMERA] Reconnected successfully: {resolved_path}")
+                            reconnect_attempts = 0
+                            self.model.predictor = None  # Reset YOLO ByteTrack state to prevent stale identities
+                        else:
+                            logger.warning(f"[CAMERA] Reconnection failed: {resolved_path}")
+                        continue
+                    else:
+                        logger.error(f"[CAMERA] Stream permanently unavailable: {resolved_path}")
+                        break
 
-                active_ids_this_frame: List[int] = []
+                reconnect_attempts = 0
 
-                for det in frame_dets:
-                    tid = det["track_id"]
-                    if tid is not None:
-                        active_ids_this_frame.append(tid)
-                        track_registry.update_track(
-                            camera_id=camera_id,
-                            track_id=tid,
-                            fine_class=det["fine_class"],
-                            object_type=det["object_type"],
-                            confidence=det["confidence"],
-                            bounding_box=det["bounding_box"],
-                            frame_index=frame_index,
-                            video_ts=timestamp_sec,
-                        )
+                if frame_index % frame_stride == 0:
+                    timestamp_sec = round(frame_index / fps, 2)
+                    frame_dets = self.track_frame(frame, conf_threshold=conf_threshold)
 
-                    all_detections.append({
-                        "camera_id": camera_id,
-                        "frame_index": frame_index,
-                        "timestamp_sec": timestamp_sec,
-                        "track_id": tid,
-                        "fine_class": det["fine_class"],
-                        "object_type": det["object_type"],
-                        "confidence": det["confidence"],
-                        "bounding_box": det["bounding_box"],
-                        "bbox_pixels": det["bbox_pixels"],
-                    })
+                    # Configurable interval face recognition check
+                    run_fr = False
+                    face_results = []
+                    if db is not None:
+                        run_fr = (frame_index % settings.FACE_RECOGNITION_INTERVAL == 0)
 
-                # Update lifecycle for tracks NOT seen this frame
-                track_registry.mark_lost(camera_id, active_ids_this_frame)
-                processed_count += 1
+                    if run_fr:
+                        try:
+                            from services.face_recognition import face_recognition_service
+                            face_results = face_recognition_service.recognize_faces(frame, db)
+                        except Exception as fe:
+                            logger.error(f"[detector] Face recognition failed at frame {frame_index}: {fe}", exc_info=True)
 
-            frame_index += 1
+                    active_ids_this_frame: List[int] = []
 
-        cap.release()
+                    matched_face_indices = set()
+                    for det in frame_dets:
+                        tid = det["track_id"]
+                        if tid is not None:
+                            active_ids_this_frame.append(tid)
+
+                        matched_face_dict = None
+
+                        # Only match face if det is human/person
+                        is_human = det.get("object_type") == "human" or det.get("fine_class") == "person"
+                        if is_human and run_fr and face_results:
+                            h_f, w_f = frame.shape[:2]
+                            px = det["bounding_box"]["x"] * w_f
+                            py = det["bounding_box"]["y"] * h_f
+                            pw = det["bounding_box"]["width"] * w_f
+                            ph = det["bounding_box"]["height"] * h_f
+
+                            best_face_idx = None
+                            best_face = None
+                            for f_idx, face in enumerate(face_results):
+                                if f_idx in matched_face_indices:
+                                    continue
+                                xf, yf, wf, hf = face["bounding_box"]
+                                fcx = xf + wf / 2
+                                fcy = yf + hf / 2
+                                if (px <= fcx <= px + pw) and (py <= fcy <= py + ph):
+                                    best_face = face
+                                    best_face_idx = f_idx
+                                    break
+
+                            if best_face is not None and best_face_idx is not None:
+                                matched_face_indices.add(best_face_idx)
+                                matched_face_dict = {
+                                    "recognized": best_face["recognized"],
+                                    "person_id": best_face["person_id"],
+                                    "name": best_face["name"],
+                                    "identity_code": best_face.get("identity_code"),
+                                    "confidence": best_face["confidence"],
+                                    "recognition_confidence": best_face.get("recognition_confidence", best_face["confidence"]),
+                                    "face_detection_confidence": best_face.get("face_detection_confidence", 0.0),
+                                    "confidence_level": best_face.get("confidence_level", "UNKNOWN"),
+                                    "identity_status": best_face.get("identity_status", "KNOWN" if best_face["recognized"] else "UNKNOWN"),
+                                    "matched_reference_id": best_face.get("matched_reference_id"),
+                                    "bounding_box": best_face.get("bounding_box")
+                                }
+
+                        if tid is not None:
+                            track_registry.update_track(
+                                camera_id=camera_id,
+                                track_id=tid,
+                                fine_class=det["fine_class"],
+                                object_type=det["object_type"],
+                                confidence=det["confidence"],
+                                bounding_box=det["bounding_box"],
+                                frame_index=frame_index,
+                                video_ts=timestamp_sec,
+                            )
+                            t_rec = track_registry._get_camera_store(camera_id).get(tid)
+                            if t_rec:
+                                t_rec.update_face_identity(matched_face_dict, settings.FACE_RECOGNITION_GRACE_PERIOD_FRAMES)
+                                det["face"] = t_rec.face_info
+                                det["bounding_box"] = t_rec.bounding_box
+                            else:
+                                det["face"] = matched_face_dict
+                        else:
+                            det["face"] = matched_face_dict
+
+                        all_detections.append({
+                            "camera_id": camera_id,
+                            "frame_index": frame_index,
+                            "timestamp_sec": timestamp_sec,
+                            "track_id": tid,
+                            "fine_class": det["fine_class"],
+                            "object_type": det["object_type"],
+                            "confidence": det["confidence"],
+                            "bounding_box": det["bounding_box"],
+                            "bbox_pixels": det["bbox_pixels"],
+                            "face": det["face"],
+                        })
+
+                    # Update lifecycle for tracks NOT seen this frame
+                    track_registry.mark_lost(camera_id, active_ids_this_frame)
+                    processed_count += 1
+
+                frame_index += 1
+
+        finally:
+            if 'cap' in locals() and cap is not None:
+                cap.release()
+
         elapsed_sec = round(time.time() - start_time, 2)
 
         tracks = track_registry.get_all_tracks(camera_id)
@@ -363,13 +465,15 @@ class YoloDetector:
         frames_with_indices: list,
         camera_id: str,
         conf_threshold: Optional[float] = None,
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
-        Run YOLO + ByteTrack on pre-captured list of (frame_index, frame_bgr) tuples.
+        Run YOLO + ByteTrack and SFace Face Recognition on pre-captured list of (frame_index, frame_bgr) tuples.
         Used by WEBCAM and RTSP sources where frames were already extracted by StreamSourceManager.
         Returns same format as process_video_with_tracking.
         """
         from ai.tracker import track_registry
+        from config import settings
         self.load_model()
         conf = conf_threshold or self.default_conf
 
@@ -386,15 +490,61 @@ class YoloDetector:
 
             frame_dets = self.track_frame(frame, conf_threshold=conf)
             active_ids = []
+
+            # Configurable interval face recognition check
+            run_fr = False
+            face_results = []
+            if db is not None:
+                run_fr = (frame_index % settings.FACE_RECOGNITION_INTERVAL == 0)
+
+            if run_fr:
+                try:
+                    from services.face_recognition import face_recognition_service
+                    face_results = face_recognition_service.recognize_faces(frame, db)
+                except Exception as fe:
+                    logger.error(f"[detector] Face recognition failed at live frame {frame_index}: {fe}", exc_info=True)
+
             for det in frame_dets:
                 det["frame_index"] = frame_index
                 det["timestamp_sec"] = timestamp_sec
                 det["camera_id"] = camera_id
-                all_detections.append(det)
 
                 tid = det.get("track_id")
                 if tid is not None:
                     active_ids.append(tid)
+
+                matched_face_dict = None
+
+                # Match by bounding box containment
+                if run_fr and face_results:
+                    h_f, w_f = frame.shape[:2]
+                    px = det["bounding_box"]["x"] * w_f
+                    py = det["bounding_box"]["y"] * h_f
+                    pw = det["bounding_box"]["width"] * w_f
+                    ph = det["bounding_box"]["height"] * h_f
+
+                    best_face = None
+                    for face in face_results:
+                        xf, yf, wf, hf = face["bounding_box"]
+                        fcx = xf + wf / 2
+                        fcy = yf + hf / 2
+                        if (px <= fcx <= px + pw) and (py <= fcy <= py + ph):
+                            best_face = face
+                            break
+
+                    if best_face:
+                        matched_face_dict = {
+                            "recognized": best_face["recognized"],
+                            "person_id": best_face["person_id"],
+                            "name": best_face["name"],
+                            "identity_code": best_face.get("identity_code"),
+                            "confidence": best_face["confidence"],
+                            "confidence_level": best_face.get("confidence_level", "UNKNOWN"),
+                            "matched_reference_id": best_face.get("matched_reference_id"),
+                            "bounding_box": best_face.get("bounding_box")
+                        }
+
+                if tid is not None:
                     track_registry.update_track(
                         camera_id=camera_id,
                         track_id=tid,
@@ -405,7 +555,18 @@ class YoloDetector:
                         frame_index=frame_index,
                         video_ts=timestamp_sec,
                     )
+                    t_rec = track_registry._get_camera_store(camera_id).get(tid)
+                    if t_rec:
+                        t_rec.update_face_identity(matched_face_dict, settings.FACE_RECOGNITION_GRACE_PERIOD_FRAMES)
+                        det["face"] = t_rec.face_info
+                    else:
+                        det["face"] = matched_face_dict
+                else:
+                    det["face"] = matched_face_dict
+
+                all_detections.append(det)
             track_registry.mark_lost(camera_id, active_ids)
+
 
         tracks = track_registry.get_all_tracks(camera_id)
 

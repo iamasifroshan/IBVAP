@@ -1,14 +1,13 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Dict
 from datetime import datetime
 
 class ThreatFactorSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     category: str
     scoreContribution: int
     description: str
-
-    class Config:
-        from_attributes = True
 
 # Camera Schemas
 class CameraBase(BaseModel):
@@ -55,6 +54,8 @@ class CameraCreate(BaseModel):
     auto_start_inference: bool = False
 
 class CameraResponse(CameraBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: Optional[datetime] = None
 
@@ -74,9 +75,6 @@ class CameraResponse(CameraBase):
     dehazeEnabled: Optional[bool] = None
     autoStartInference: Optional[bool] = None
 
-    class Config:
-        from_attributes = True
-
 # Detection Schemas
 class DetectionBase(BaseModel):
     camera_id: str
@@ -87,19 +85,22 @@ class DetectionBase(BaseModel):
     frame_index: Optional[int] = None
     timestamp_sec: Optional[float] = None
     bounding_box: dict = Field(default_factory=dict)
+    face: Optional[dict] = None
+
 
 class DetectionCreate(DetectionBase):
     pass
 
 class DetectionResponse(DetectionBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
-
 # Track Schemas
 class TrackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     camera_id: str
     track_id: int                    # Real ByteTrack integer ID
@@ -114,10 +115,8 @@ class TrackResponse(BaseModel):
     frames_seen: int
     video_ts_first_sec: float
     video_ts_last_sec: float
+    face: Optional[dict] = None
     created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 # Zone Schemas
 class PointSchema(BaseModel):
@@ -144,11 +143,10 @@ class ZoneCreate(ZoneBase):
     pass
 
 class ZoneResponse(ZoneBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 # Incident Schemas
 class IncidentBase(BaseModel):
@@ -176,6 +174,9 @@ class IncidentBase(BaseModel):
     direction: str = "Inward Perimeter"
     smart_alert_confirmed: bool = True
     validation_checks: dict = Field(default_factory=dict)
+    person_name: Optional[str] = "UNKNOWN"
+    face_recognized: Optional[bool] = False
+    face_confidence: Optional[float] = 0.0
 
 class IncidentCreate(IncidentBase):
     pass
@@ -184,6 +185,8 @@ class IncidentStatusUpdate(BaseModel):
     status: str
 
 class IncidentResponse(IncidentBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     timestamp: datetime
 
@@ -205,9 +208,9 @@ class IncidentResponse(IncidentBase):
     smartAlertConfirmed: Optional[bool] = True
     validationChecks: dict = Field(default_factory=dict)
     syncedToCloud: Optional[bool] = False
-
-    class Config:
-        from_attributes = True
+    personName: Optional[str] = None
+    faceRecognized: Optional[bool] = None
+    faceConfidence: Optional[float] = None
 
 # Evidence Schemas
 class EvidenceCreate(BaseModel):
@@ -217,23 +220,21 @@ class EvidenceCreate(BaseModel):
     sha256_hash: Optional[str] = None
 
 class EvidenceResponse(EvidenceCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 # SyncJob Schemas
 class SyncJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     incident_id: str
     status: str
     retry_count: int
     created_at: datetime
     synced_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 # System Metrics & Status Schemas
 class SystemMetricsSchema(BaseModel):
@@ -265,3 +266,79 @@ class SearchQueryRequest(BaseModel):
 class SearchQueryResponse(BaseModel):
     filters: dict
     results: List[IncidentResponse]
+
+
+# Face Recognition Schemas
+class FaceReferenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    person_id: str
+    image_path: Optional[str] = None
+    created_at: datetime
+
+class RegisteredPersonBase(BaseModel):
+    person_id: str
+    name: str
+    identity_code: Optional[str] = None
+    is_active: bool = True
+
+class RegisteredPersonCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    identity_code: Optional[str] = None
+
+class RegisteredPersonUpdate(BaseModel):
+    name: Optional[str] = None
+    identity_code: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class RegisteredPersonResponse(RegisteredPersonBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    image_path: Optional[str] = None
+    references_count: int = 1
+    references: Optional[List[FaceReferenceResponse]] = None
+    created_at: datetime
+    updated_at: datetime
+
+class FaceRecognitionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    person_id: Optional[str] = None
+    name: Optional[str] = None
+    identity_code: Optional[str] = None
+    recognized: bool
+    confidence: float
+    recognition_confidence: Optional[float] = 0.0
+    face_detection_confidence: Optional[float] = 0.0
+    confidence_level: str = "UNKNOWN"
+    identity_status: str = "FACE_UNAVAILABLE"
+    matched_reference_id: Optional[str] = None
+    bounding_box: Optional[List[int]] = None  # [x, y, w, h] of face box
+    error: Optional[str] = None
+
+
+class ANPRObservationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    anpr_id: str
+    camera_id: str
+    vehicle_track_id: int
+    vehicle_track_label: str
+    vehicle_class: str
+    plate_text: str
+    raw_ocr_text: Optional[str] = None
+    confidence: float
+    format_valid: bool
+    direction: str = "unknown"
+    first_seen: datetime
+    last_seen: datetime
+
+
+class ANPRStatsResponse(BaseModel):
+    total_reads: int
+    unique_plates: int
+    valid_format_count: int
+    by_camera: Dict[str, int]

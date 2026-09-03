@@ -95,19 +95,48 @@ export async function apiFetch<T>(
   url: string,
   options: FetchOptions = {}
 ): Promise<T> {
-  const { timeoutMs = 8000, ...rest } = options;
+  const { timeoutMs = 30000, signal: externalSignal, ...rest } = options;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'));
+    } catch {
+      controller.abort();
+    }
+  }, timeoutMs);
+
+  const onExternalAbort = () => {
+    try {
+      controller.abort(externalSignal?.reason);
+    } catch {
+      controller.abort();
+    }
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timer);
+      onExternalAbort();
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
 
   try {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      ...((rest.headers || {}) as Record<string, string>),
+    };
+    if (!(rest.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        ...rest.headers,
-      },
+      headers,
       ...rest,
     });
 
@@ -130,7 +159,25 @@ export async function apiFetch<T>(
     }
 
     return (await response.json()) as T;
+  } catch (err: any) {
+    if (timedOut || err.name === 'TimeoutError') {
+      const timeoutErr = new Error(`Request timed out after ${timeoutMs}ms — ${url}`) as any;
+      timeoutErr.name = 'TimeoutError';
+      timeoutErr.apiDetail = `Request timed out after ${timeoutMs}ms. Backend may be busy.`;
+      throw timeoutErr;
+    }
+    if (err.name === 'AbortError' || String(err?.message || '').includes('aborted')) {
+      const abortErr = new Error(err.message || 'Request cancelled') as any;
+      abortErr.name = 'AbortError';
+      abortErr.apiDetail = err.message || 'Request cancelled';
+      throw abortErr;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
   }
 }
+

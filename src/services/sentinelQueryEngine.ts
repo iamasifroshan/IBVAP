@@ -11,6 +11,7 @@ export interface StructuredSearchFilters {
   extractedTimeRange?: string;
   extractedEventType?: string;
   extractedEnvironment?: EnvironmentCondition;
+  extractedPlate?: string;
   validated: boolean;
   confidence: number;
 }

@@ -15,7 +15,8 @@ export type PageId =
   | 'analytics'
   | 'settings'
   | 'system-verification'
-  | 'ai-training-center';
+  | 'ai-training-center'
+  | 'face-recognition';
 
 export type NetworkStatus = 'online' | 'limited' | 'offline' | 'syncing' | 'connecting';
 
@@ -75,10 +76,17 @@ export interface Incident {
   validationChecks?: any;
   syncedToCloud: boolean;
   syncedTimestamp?: string;
+  person_name?: string;
+  personName?: string;
+  face_recognized?: boolean;
+  faceRecognized?: boolean;
+  face_confidence?: number;
+  faceConfidence?: number;
 }
 
 export interface Camera {
   id: string;
+  camera_id?: string;
   name: string;
   sector: string;
   outpost: string;
@@ -98,7 +106,43 @@ export interface Camera {
   lastActivity: string;
   nightVisionMode: boolean;
   dehazeEnabled: boolean;
-  autoStartInference: boolean;
+  autoStartInference?: boolean;
+}
+
+export function getFallbackCamera(targetId: string): Camera {
+  return {
+    id: targetId,
+    camera_id: targetId,
+    name: targetId === 'BORDER-CAM-07' ? 'Border Perimeter East' : `Camera ${targetId}`,
+    sector: 'Sector A',
+    outpost: 'Border Outpost North',
+    protocol: 'WEBCAM',
+    streamUrl: 'webcam',
+    fps: 30,
+    resolution: '1280x720 (720p)',
+    status: 'OFFLINE',
+    healthScore: 0,
+    visibilityScore: 0,
+    lightingLux: 0,
+    aiReliability: 0,
+    adaptiveProcessingMode: 'Offline / Reconnecting',
+    humanVerificationRequired: false,
+    verificationRecommendation: 'Camera temporarily offline or reconnecting.',
+    activeZone: 'Restricted Zone',
+    lastActivity: 'Reconnecting...',
+    nightVisionMode: false,
+    dehazeEnabled: false,
+    autoStartInference: false,
+  };
+}
+
+export function getCameraById(cameras: Camera[], targetId: string): Camera {
+  if (!targetId) {
+    return cameras[0] || getFallbackCamera('BORDER-CAM-07');
+  }
+  const match = cameras.find(c => c.id === targetId || c.camera_id === targetId);
+  if (match) return match;
+  return getFallbackCamera(targetId);
 }
 
 export interface VirtualZone {
@@ -202,3 +246,109 @@ export interface SearchFilters {
   validated?: boolean;
   confidence?: number;
 }
+
+export interface FaceReference {
+  id: string;
+  person_id: string;
+  personId?: string;
+  image_path?: string;
+  imagePath?: string;
+  created_at: string;
+  createdAt?: string;
+}
+
+export interface RegisteredPerson {
+  id: string;
+  person_id: string;
+  personId?: string;
+  name: string;
+  identity_code?: string;
+  identityCode?: string;
+  is_active: boolean;
+  isActive?: boolean;
+  image_path?: string;
+  imagePath?: string;
+  references_count?: number;
+  referencesCount?: number;
+  references?: FaceReference[];
+  created_at: string;
+  createdAt?: string;
+  updated_at: string;
+  updatedAt?: string;
+}
+
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
+export type IdentityStatus = 'KNOWN' | 'UNKNOWN' | 'FACE_UNAVAILABLE' | 'FACE_PROCESSING_ERROR';
+
+export interface FaceRecognitionResult {
+  person_id?: string | null;
+  personId?: string | null;
+  name?: string | null;
+  identity_code?: string | null;
+  identityCode?: string | null;
+  recognized: boolean;
+  confidence: number;
+  recognition_confidence?: number;
+  recognitionConfidence?: number;
+  face_detection_confidence?: number;
+  faceDetectionConfidence?: number;
+  confidence_level?: ConfidenceLevel;
+  confidenceLevel?: ConfidenceLevel;
+  identity_status?: IdentityStatus;
+  identityStatus?: IdentityStatus;
+  matched_reference_id?: string | null;
+  matchedReferenceId?: string | null;
+  bounding_box?: [number, number, number, number] | null;
+  boundingBox?: [number, number, number, number] | null;
+}
+
+export interface VehicleDetection {
+  class: string;
+  vehicle_class: string;
+  object_type: 'vehicle';
+  confidence: number;
+  track_id: number;
+  track_label: string;
+  bounding_box: BoundingBox;
+  bbox: { x: number; y: number; width: number; height: number };
+  direction: 'stationary' | 'left' | 'right' | 'inbound' | 'outbound' | 'unknown';
+  frames_seen: number;
+  plate_text?: string | null;
+  raw_ocr_text?: string | null;
+  plate_confidence?: number;
+  format_valid?: boolean;
+  plate_stable?: boolean;
+}
+
+export interface VehicleStats {
+  total: number;
+  car: number;
+  motorcycle: number;
+  bus: number;
+  truck: number;
+  by_camera: Record<string, number>;
+}
+
+export interface ANPRObservation {
+  id: string;
+  anpr_id: string;
+  camera_id: string;
+  vehicle_track_id: number;
+  vehicle_track_label: string;
+  vehicle_class: string;
+  plate_text: string;
+  raw_ocr_text?: string | null;
+  confidence: number;
+  format_valid: boolean;
+  direction: string;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface ANPRStats {
+  total_reads: number;
+  unique_plates: number;
+  valid_format_count: number;
+  by_camera: Record<string, number>;
+}
+

@@ -20,6 +20,12 @@ import type {
   SyncJob,
   SystemMetrics,
   SearchFilters,
+  RegisteredPerson,
+  FaceRecognitionResult,
+  VehicleDetection,
+  VehicleStats,
+  ANPRObservation,
+  ANPRStats,
 } from '../types';
 import type { StructuredSearchFilters } from './sentinelQueryEngine';
 
@@ -53,6 +59,46 @@ async function tryLive<T>(
     throw err;
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// REGISTERED PEOPLE MOCK STATE
+// ─────────────────────────────────────────────────────────────
+const MOCK_REGISTERED_PEOPLE: RegisteredPerson[] = [
+  {
+    id: "uuid-david",
+    person_id: "person_david",
+    personId: "person_david",
+    name: "David",
+    identity_code: "EMP-492",
+    identityCode: "EMP-492",
+    is_active: true,
+    isActive: true,
+    image_path: "",
+    imagePath: "",
+    created_at: "2026-08-25T10:00:00Z",
+    createdAt: "2026-08-25T10:00:00Z",
+    updated_at: "2026-08-25T10:00:00Z",
+    updatedAt: "2026-08-25T10:00:00Z"
+  },
+  {
+    id: "uuid-jane",
+    person_id: "person_jane",
+    personId: "person_jane",
+    name: "Jane Doe",
+    identity_code: "EMP-102",
+    identityCode: "EMP-102",
+    is_active: true,
+    isActive: true,
+    image_path: "",
+    imagePath: "",
+    created_at: "2026-08-26T14:30:00Z",
+    createdAt: "2026-08-26T14:30:00Z",
+    updated_at: "2026-08-26T14:30:00Z",
+    updatedAt: "2026-08-26T14:30:00Z"
+  }
+];
+
+let mockRegisteredPeople = [...MOCK_REGISTERED_PEOPLE];
 
 // ─────────────────────────────────────────────────────────────
 // Public API surface
@@ -485,6 +531,20 @@ export const ibvapApi = {
       bounding_box: { x: number; y: number; width: number; height: number };
       bbox: { x: number; y: number; width: number; height: number };
     }>;
+    vehicle_count: number;
+    vehicle_detections: Array<{
+      class: string;
+      vehicle_class: string;
+      confidence: number;
+      track_id: number;
+      track_label: string;
+      bounding_box: { x: number; y: number; width: number; height: number };
+      bbox: { x: number; y: number; width: number; height: number };
+      direction: string;
+      frames_seen: number;
+    }>;
+    incidents_created_count?: number;
+    incident_ids?: string[];
   }> {
     const formData = new FormData();
     formData.append('file', fileBlob, 'frame.jpg');
@@ -493,7 +553,9 @@ export const ibvapApi = {
       return {
         timestamp: new Date().toISOString(),
         person_count: 0,
-        detections: []
+        detections: [],
+        vehicle_count: 0,
+        vehicle_detections: [],
       };
     }
 
@@ -566,6 +628,304 @@ export const ibvapApi = {
       method: 'PATCH'
     });
     return normalizeCamera(res);
+  },
+
+  // ── Face Recognition Endpoints ──────────────────────────────
+  async listRegisteredPeople(signal?: AbortSignal): Promise<RegisteredPerson[]> {
+    return tryLive(
+      async () => {
+        const list = await apiFetch<RegisteredPerson[]>(`${API_BASE_URL}/faces/?active_only=false`, { signal });
+        return list.map(p => ({
+          ...p,
+          personId: p.person_id,
+          identityCode: p.identity_code,
+          isActive: p.is_active,
+          imagePath: p.image_path,
+          createdAt: p.created_at,
+          updatedAt: p.updated_at
+        }));
+      },
+      mockRegisteredPeople,
+      'GET /faces'
+    );
+  },
+
+  async registerFace(formData: FormData): Promise<RegisteredPerson> {
+    if (USE_MOCK) {
+      const name = formData.get('name') as string;
+      const identityCode = formData.get('identity_code') as string || undefined;
+      if (identityCode && mockRegisteredPeople.some(p => p.identity_code === identityCode)) {
+        throw new Error("Person with this identity code is already registered.");
+      }
+      const newPerson: RegisteredPerson = {
+        id: `uuid-${Math.random().toString(36).substr(2, 9)}`,
+        person_id: `person_${Math.random().toString(36).substr(2, 5)}`,
+        name,
+        identity_code: identityCode,
+        identityCode,
+        is_active: true,
+        isActive: true,
+        image_path: '',
+        imagePath: '',
+        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      newPerson.personId = newPerson.person_id;
+      mockRegisteredPeople.push(newPerson);
+      return newPerson;
+    }
+
+    const res = await apiFetch<RegisteredPerson>(`${API_BASE_URL}/faces/register`, {
+      method: 'POST',
+      body: formData,
+    });
+    return {
+      ...res,
+      personId: res.person_id,
+      identityCode: res.identity_code,
+      isActive: res.is_active,
+      imagePath: res.image_path,
+      createdAt: res.created_at,
+      updatedAt: res.updated_at
+    };
+  },
+
+  async getRegisteredPerson(personId: string): Promise<RegisteredPerson> {
+    return tryLive(
+      async () => {
+        const res = await apiFetch<RegisteredPerson>(`${API_BASE_URL}/faces/${personId}`);
+        return {
+          ...res,
+          personId: res.person_id,
+          identityCode: res.identity_code,
+          isActive: res.is_active,
+          imagePath: res.image_path,
+          createdAt: res.created_at,
+          updatedAt: res.updated_at
+        };
+      },
+      mockRegisteredPeople.find(p => p.person_id === personId || p.id === personId) || mockRegisteredPeople[0],
+      `GET /faces/${personId}`
+    );
+  },
+
+  async updateRegisteredPerson(personId: string, formData: FormData): Promise<RegisteredPerson> {
+    if (USE_MOCK) {
+      const idx = mockRegisteredPeople.findIndex(p => p.person_id === personId || p.id === personId);
+      if (idx === -1) throw new Error("Registered person not found.");
+      
+      const name = formData.get('name') as string | null;
+      const identityCode = formData.get('identity_code') as string | null;
+      const isActiveStr = formData.get('is_active') as string | null;
+      const isActive = isActiveStr !== null ? isActiveStr === 'true' : null;
+
+      if (identityCode && identityCode !== mockRegisteredPeople[idx].identity_code) {
+        if (mockRegisteredPeople.some(p => p.identity_code === identityCode)) {
+          throw new Error("Person with this identity code is already registered.");
+        }
+      }
+
+      const updated = { ...mockRegisteredPeople[idx] };
+      if (name !== null) {
+        updated.name = name;
+      }
+      if (identityCode !== null) {
+        updated.identity_code = identityCode;
+        updated.identityCode = identityCode;
+      }
+      if (isActive !== null) {
+        updated.is_active = isActive;
+        updated.isActive = isActive;
+      }
+      updated.updated_at = new Date().toISOString();
+      updated.updatedAt = new Date().toISOString();
+
+      mockRegisteredPeople[idx] = updated;
+      return updated;
+    }
+
+    const res = await apiFetch<RegisteredPerson>(`${API_BASE_URL}/faces/${personId}`, {
+      method: 'PUT',
+      body: formData,
+    });
+    return {
+      ...res,
+      personId: res.person_id,
+      identityCode: res.identity_code,
+      isActive: res.is_active,
+      imagePath: res.image_path,
+      createdAt: res.created_at,
+      updatedAt: res.updated_at
+    };
+  },
+
+  async deleteRegisteredPerson(personId: string): Promise<{ message: string; person_id: string }> {
+    if (USE_MOCK) {
+      mockRegisteredPeople = mockRegisteredPeople.filter(p => p.person_id !== personId && p.id !== personId);
+      return { message: "Registered person deleted successfully.", person_id: personId };
+    }
+
+    return await apiFetch<{ message: string; person_id: string }>(`${API_BASE_URL}/faces/${personId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async addFaceReference(personId: string, formData: FormData): Promise<any> {
+    if (USE_MOCK) {
+      const newRef = {
+        id: `ref_${Date.now()}`,
+        person_id: personId,
+        image_path: `/storage/faces/${personId}_ref_${Date.now()}.jpg`,
+        created_at: new Date().toISOString()
+      };
+      const p = mockRegisteredPeople.find(x => x.person_id === personId || x.id === personId);
+      if (p) {
+        p.references_count = (p.references_count || 1) + 1;
+        p.references = p.references || [];
+        p.references.push(newRef);
+      }
+      return newRef;
+    }
+
+    const res = await apiFetch<any>(`${API_BASE_URL}/faces/${personId}/references`, {
+      method: 'POST',
+      body: formData,
+    });
+    return {
+      ...res,
+      personId: res.person_id,
+      imagePath: res.image_path,
+      createdAt: res.created_at
+    };
+  },
+
+  async listFaceReferences(personId: string): Promise<any[]> {
+    if (USE_MOCK) {
+      const p = mockRegisteredPeople.find(x => x.person_id === personId || x.id === personId);
+      if (p && p.references) return p.references;
+      return [
+        {
+          id: `ref_default_${personId}`,
+          person_id: personId,
+          image_path: `/storage/faces/${personId}.jpg`,
+          created_at: new Date().toISOString()
+        }
+      ];
+    }
+
+    const refs = await apiFetch<any[]>(`${API_BASE_URL}/faces/${personId}/references`);
+    return refs.map(r => ({
+      ...r,
+      personId: r.person_id,
+      imagePath: r.image_path,
+      createdAt: r.created_at
+    }));
+  },
+
+  async deleteFaceReference(personId: string, referenceId: string): Promise<{ message: string; reference_id: string }> {
+    if (USE_MOCK) {
+      const p = mockRegisteredPeople.find(x => x.person_id === personId || x.id === personId);
+      if (p) {
+        if (p.is_active && (p.references_count || 1) <= 1) {
+          throw new Error("Cannot delete the last remaining face reference for an active registered person.");
+        }
+        p.references_count = Math.max(1, (p.references_count || 1) - 1);
+        p.references = (p.references || []).filter(r => r.id !== referenceId);
+      }
+      return { message: "Face reference deleted successfully.", reference_id: referenceId };
+    }
+
+    return await apiFetch<{ message: string; reference_id: string }>(`${API_BASE_URL}/faces/${personId}/references/${referenceId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async recognizeFace(formData: FormData): Promise<FaceRecognitionResult[]> {
+
+    if (USE_MOCK) {
+      return [
+        {
+          person_id: "person_david",
+          personId: "person_david",
+          name: "David",
+          recognized: true,
+          confidence: 0.94,
+          bounding_box: [140, 140, 20, 20],
+          boundingBox: [140, 140, 20, 20]
+        }
+      ];
+    }
+
+    const list = await apiFetch<FaceRecognitionResult[]>(`${API_BASE_URL}/faces/recognize`, {
+      method: 'POST',
+      body: formData,
+    });
+    return list.map(r => ({
+      ...r,
+      personId: r.person_id,
+      boundingBox: r.bounding_box
+    }));
+  },
+
+  // ── GET /api/v1/vehicles/stats ─────────────────────────────
+  // Aggregate real-time vehicle counts across all cameras.
+  async getVehicleStats(): Promise<VehicleStats> {
+    const empty: VehicleStats = { total: 0, car: 0, motorcycle: 0, bus: 0, truck: 0, by_camera: {} };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<VehicleStats>(`${API_BASE_URL}/vehicles/stats`);
+    } catch {
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/cameras/:id/vehicles ──────────────────────
+  // Active vehicle tracks for a specific camera.
+  async getCameraVehicles(cameraId: string): Promise<{ vehicle_count: number; vehicles: VehicleDetection[] }> {
+    const empty = { vehicle_count: 0, vehicles: [] };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<{ vehicle_count: number; vehicles: VehicleDetection[] }>(
+        `${API_BASE_URL}/cameras/${cameraId}/vehicles`
+      );
+    } catch {
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/anpr/stats ─────────────────────────────────
+  async getANPRStats(): Promise<ANPRStats> {
+    const empty: ANPRStats = { total_reads: 0, unique_plates: 0, valid_format_count: 0, by_camera: {} };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<ANPRStats>(`${API_BASE_URL}/anpr/stats`);
+    } catch {
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/cameras/:id/anpr ───────────────────────────
+  async getCameraANPR(cameraId: string, limit: number = 50): Promise<ANPRObservation[]> {
+    if (USE_MOCK) return [];
+    try {
+      return await apiFetch<ANPRObservation[]>(`${API_BASE_URL}/cameras/${cameraId}/anpr?limit=${limit}`);
+    } catch {
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/anpr/search ────────────────────────────────
+  async searchANPR(queryText: string, cameraId?: string): Promise<ANPRObservation[]> {
+    if (USE_MOCK) return [];
+    try {
+      let url = `${API_BASE_URL}/anpr/search?plate=${encodeURIComponent(queryText)}`;
+      if (cameraId) url += `&camera_id=${encodeURIComponent(cameraId)}`;
+      return await apiFetch<ANPRObservation[]>(url);
+    } catch {
+      return [];
+    }
   },
 };
 
@@ -667,4 +1027,13 @@ const MOCK_ANALYTICS_SUMMARY: AnalyticsSummary = {
     MOCK_INCIDENTS.reduce((acc, i) => acc + i.threatScore, 0) / MOCK_INCIDENTS.length
   ),
   topSector: 'Sector B',
+};
+
+const MOCK_VEHICLE_STATS: VehicleStats = {
+  total: 0,
+  car: 0,
+  motorcycle: 0,
+  bus: 0,
+  truck: 0,
+  by_camera: {},
 };
