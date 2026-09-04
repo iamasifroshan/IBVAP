@@ -692,7 +692,7 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
                   });
                 }
               }}
-              src={videoUrl}
+              src={videoUrl ? `${videoUrl}?cors=1` : undefined}
               crossOrigin="anonymous"
               className="w-full h-full object-contain"
               style={{ maxHeight: '500px' }}

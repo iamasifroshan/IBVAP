@@ -121,7 +121,7 @@ class TestFaceSurveillance(unittest.TestCase):
             "recognized": False,
             "person_id": None,
             "name": "UNKNOWN",
-            "confidence": 0.21,
+            "confidence": 0.88,
             "bounding_box": [50, 50, 30, 30]
         }]
 
@@ -345,7 +345,7 @@ class TestFaceSurveillance(unittest.TestCase):
             "recognized": False,
             "person_id": None,
             "name": "UNKNOWN",
-            "confidence": 0.30,
+            "confidence": 0.88,
             "bounding_box": [140, 140, 20, 20]
         }]
 

@@ -162,6 +162,8 @@ def run_migrations():
             cursor.execute("ALTER TABLE incidents ADD COLUMN face_recognized BOOLEAN DEFAULT 0")
         if "face_confidence" not in inc_columns:
             cursor.execute("ALTER TABLE incidents ADD COLUMN face_confidence FLOAT DEFAULT 0.0")
+        if "source_video_timestamp_sec" not in inc_columns:
+            cursor.execute("ALTER TABLE incidents ADD COLUMN source_video_timestamp_sec FLOAT DEFAULT NULL")
 
         conn.commit()
         conn.close()

@@ -102,7 +102,7 @@ def test_genuine_human_runtime(client_fixture):
             x += 0.01 # smooth movement
             y = 0.5 # stable
             mock_track.return_value = [{"track_id": 3, "fine_class": "person", "object_type": "human", "confidence": 0.90, "bounding_box": {"x": x, "y": y, "width": w, "height": h}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 150, "y2": 150}}]
-            mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.30, "recognition_confidence": 0.30, "face_detection_confidence": 0.90, "identity_status": "UNKNOWN", "bounding_box": [int(x*320) + 10, int(y*320) + 10, 20, 20]}]
+            mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.88, "recognition_confidence": 0.88, "face_detection_confidence": 0.90, "identity_status": "UNKNOWN", "bounding_box": [int(x*320) + 10, int(y*320) + 10, 20, 20]}]
             client.post("/api/v1/cameras/CAM-HUMAN/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
         
     db = TestingSessionLocal()

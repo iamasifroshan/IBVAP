@@ -90,7 +90,7 @@ class TestIdentitySemantics(unittest.TestCase):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, enc = cv2.imencode('.jpg', img)
 
-        for _ in range(4):
+        for _ in range(6):
             resp = self.client.post("/api/v1/cameras/CAM-ID-SEM/detect-frame", files={"file": ("frame.jpg", enc.tobytes(), "image/jpeg")})
             self.assertEqual(resp.status_code, 200)
 
@@ -115,7 +115,7 @@ class TestIdentitySemantics(unittest.TestCase):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, enc = cv2.imencode('.jpg', img)
 
-        for _ in range(4):
+        for _ in range(6):
             resp = self.client.post("/api/v1/cameras/CAM-ID-SEM/detect-frame", files={"file": ("frame.jpg", enc.tobytes(), "image/jpeg")})
             self.assertEqual(resp.status_code, 200)
 
@@ -165,15 +165,15 @@ class TestIdentitySemantics(unittest.TestCase):
              "bbox_pixels": {"x1": 50, "y1": 50, "x2": 150, "y2": 200}}
         ]
         mock_rec.return_value = [
-            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.32,
-             "recognition_confidence": 0.32, "face_detection_confidence": 0.92,
+            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.88,
+             "recognition_confidence": 0.88, "face_detection_confidence": 0.92,
              "confidence_level": "UNKNOWN", "identity_status": "UNKNOWN", "bounding_box": [60, 60, 30, 30]}
         ]
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, enc = cv2.imencode('.jpg', img)
 
-        for _ in range(4):
+        for _ in range(6):
             resp = self.client.post("/api/v1/cameras/CAM-ID-SEM/detect-frame", files={"file": ("frame.jpg", enc.tobytes(), "image/jpeg")})
             self.assertEqual(resp.status_code, 200)
 
@@ -264,15 +264,15 @@ class TestIdentitySemantics(unittest.TestCase):
             {"recognized": True, "person_id": "p1", "name": "ASIF", "confidence": 0.98,
              "recognition_confidence": 0.98, "face_detection_confidence": 0.95,
              "confidence_level": "HIGH", "identity_status": "KNOWN", "bounding_box": [40, 60, 20, 20]},
-            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.25,
-             "recognition_confidence": 0.25, "face_detection_confidence": 0.91,
+            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.88,
+             "recognition_confidence": 0.88, "face_detection_confidence": 0.91,
              "confidence_level": "UNKNOWN", "identity_status": "UNKNOWN", "bounding_box": [200, 60, 20, 20]}
         ]
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, enc = cv2.imencode('.jpg', img)
 
-        for _ in range(4):
+        for _ in range(6):
             resp = self.client.post("/api/v1/cameras/CAM-ID-SEM/detect-frame", files={"file": ("frame.jpg", enc.tobytes(), "image/jpeg")})
             self.assertEqual(resp.status_code, 200)
 
@@ -292,7 +292,7 @@ class TestIdentitySemantics(unittest.TestCase):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, enc = cv2.imencode('.jpg', img)
 
-        for _ in range(3):
+        for _ in range(6):
             resp = self.client.post("/api/v1/cameras/CAM-ID-SEM/detect-frame", files={"file": ("frame.jpg", enc.tobytes(), "image/jpeg")})
             self.assertEqual(resp.status_code, 200)
 

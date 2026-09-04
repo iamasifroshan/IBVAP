@@ -26,8 +26,15 @@ class Settings:
 
     # SmartAlert Configurations
     SMART_ALERT_MIN_CONF: float = float(os.getenv("SMART_ALERT_MIN_CONF", "0.35"))
-    SMART_ALERT_MIN_FRAMES: int = int(os.getenv("SMART_ALERT_MIN_FRAMES", "3"))
-    SMART_ALERT_DUPLICATE_WINDOW: float = float(os.getenv("SMART_ALERT_DUPLICATE_WINDOW", "60.0"))
+    # Minimum frames a track must be seen before an incident is confirmed (3 was too low)
+    SMART_ALERT_MIN_FRAMES: int = int(os.getenv("SMART_ALERT_MIN_FRAMES", "5"))
+    # Duplicate suppression window in seconds (300 = 5 min, protects across server restarts)
+    SMART_ALERT_DUPLICATE_WINDOW: float = float(os.getenv("SMART_ALERT_DUPLICATE_WINDOW", "300.0"))
+    # Minimum YuNet face-detection confidence to classify a person as UNKNOWN.
+    # Below this threshold, the detection is FACE_UNAVAILABLE (prevents cloud textures
+    # from being misidentified as faces and triggering UNKNOWN → incident).
+    FACE_MIN_DETECTION_CONF_FOR_UNKNOWN: float = float(os.getenv("FACE_MIN_DETECTION_CONF_FOR_UNKNOWN", "0.65"))
+
     
     # BorderThreat Engine Configurations
     THREAT_HUMAN_WEIGHT: int = int(os.getenv("THREAT_HUMAN_WEIGHT", "20"))

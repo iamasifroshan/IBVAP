@@ -230,7 +230,7 @@ def test_07_temporal_stabilization():
 def test_08_multiframe_plate_stability():
     """TrackRecord updates plate_stable=True after multiple observations."""
     rec = TrackRecord(camera_id="cam1", track_id=1, fine_class="car", object_type="vehicle")
-    for _ in range(3):
+    for _ in range(6):
         rec.update_vehicle_plate("KA-01-AB-1234", "KA01AB1234", 0.90, True)
 
     assert rec.plate_text == "KA01AB1234"
@@ -262,7 +262,7 @@ def test_10_two_vehicles_different_plates():
     rec1 = TrackRecord(camera_id="cam1", track_id=1, fine_class="car", object_type="vehicle")
     rec2 = TrackRecord(camera_id="cam1", track_id=2, fine_class="truck", object_type="vehicle")
 
-    for _ in range(3):
+    for _ in range(6):
         rec1.update_vehicle_plate("KA01AB1234", "KA01AB1234", 0.92, True)
         rec2.update_vehicle_plate("DL3C5678", "DL3C5678", 0.88, True)
 
@@ -316,7 +316,7 @@ def test_11_camera_isolation_plates(client, test_camera, db):
 def test_12_in_memory_plate_persistence():
     """Plate data stays attached to TrackRecord across update() ticks."""
     rec = TrackRecord(camera_id="cam1", track_id=12, fine_class="car", object_type="vehicle", bounding_box={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.2})
-    for _ in range(3):
+    for _ in range(6):
         rec.update_vehicle_plate("KA01AB1234", "KA01AB1234", 0.90, True)
 
     # Next frame position update tick
@@ -554,7 +554,7 @@ def test_21_phase1_vehicle_regression(client, test_camera, db):
         mock_pr.return_value = None  # No plate found
 
         res = None
-        for _ in range(4):
+        for _ in range(6):
             res = client.post(
                 "/api/v1/cameras/CAM-ANPR-TEST/detect-frame?conf_threshold=0.35",
                 files={"file": ("frame.jpg", _make_frame_jpeg(), "image/jpeg")}

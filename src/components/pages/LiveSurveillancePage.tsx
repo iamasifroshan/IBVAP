@@ -817,6 +817,7 @@ export const LiveSurveillancePage: React.FC = () => {
                 <video
                   ref={videoRef}
                   src={feedSource === 'UPLOADED' && uploadedVideoUrl ? uploadedVideoUrl : (feedSource === 'SIMULATED' ? (ibvapApi.getVideoUrlForCamera(activeCamera) || '') : undefined)}
+                  crossOrigin="anonymous"
                   autoPlay
                   loop
                   muted

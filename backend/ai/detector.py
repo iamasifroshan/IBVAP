@@ -539,7 +539,10 @@ class YoloDetector:
                             "name": best_face["name"],
                             "identity_code": best_face.get("identity_code"),
                             "confidence": best_face["confidence"],
+                            "recognition_confidence": best_face.get("recognition_confidence", best_face["confidence"]),
+                            "face_detection_confidence": best_face.get("face_detection_confidence", 0.0),
                             "confidence_level": best_face.get("confidence_level", "UNKNOWN"),
+                            "identity_status": best_face.get("identity_status", "KNOWN" if best_face["recognized"] else "UNKNOWN"),
                             "matched_reference_id": best_face.get("matched_reference_id"),
                             "bounding_box": best_face.get("bounding_box")
                         }

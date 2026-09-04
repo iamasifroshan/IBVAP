@@ -200,7 +200,7 @@ class TestSmartAlertDecisionEngine(unittest.TestCase):
             camera_id="CAM1", track_id=206, fine_class="person", object_type="human",
             confidence=0.90, frames_seen=10, is_inside_zone=True, zone_name="Zone", is_first_entry=True,
             db=self.db, bbox={"x": 0.5, "y": 0.5, "width": 0.1, "height": 0.2},
-            face_metadata={"identity_status": "UNKNOWN", "confidence": 0.35, "recognition_confidence": 0.35, "recognized": False}
+            face_metadata={"identity_status": "UNKNOWN", "confidence": 0.70, "recognition_confidence": 0.88, "recognized": False}
         )
         self.assertTrue(is_conf)
         self.assertIn("UNKNOWN (Face Verified)", reason)

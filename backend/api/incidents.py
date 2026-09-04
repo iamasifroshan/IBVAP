@@ -4,7 +4,8 @@ from typing import List, Optional
 import uuid
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
+
 
 from database.db import get_db
 from database.models import IncidentModel, EvidenceModel
@@ -42,6 +43,7 @@ def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
         synced_to_cloud=i.synced_to_cloud,
         synced_timestamp=i.synced_timestamp,
         timestamp=i.timestamp,
+        source_video_timestamp_sec=getattr(i, 'source_video_timestamp_sec', None),
         # CamelCase Aliases for Frontend
         cameraName=i.camera_name,
         cameraId=i.camera_id,
@@ -59,8 +61,13 @@ def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
         speedKmh=i.speed_kmh,
         smartAlertConfirmed=i.smart_alert_confirmed,
         validationChecks=i.validation_checks or {},
-        syncedToCloud=i.synced_to_cloud
+        syncedToCloud=i.synced_to_cloud,
+        personName=i.person_name,
+        faceRecognized=i.face_recognized,
+        faceConfidence=i.face_confidence,
+        sourceVideoTimestampSec=getattr(i, 'source_video_timestamp_sec', None),
     )
+
 
 @router.get("", response_model=List[IncidentResponse])
 def get_incidents(db: Session = Depends(get_db)):
@@ -199,7 +206,7 @@ def upload_webcam_evidence(
         incident_id=inc_id_str,
         evidence_type="snapshot",
         file_path=dest_path,
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
     db.add(db_ev)
     db.commit()

@@ -14,6 +14,8 @@ import { useApp } from '../../context/AppContext';
 import { Badge } from '../common/Badge';
 import { ThreatScoreBadge } from '../common/ThreatScoreBadge';
 import { EmptyState } from '../common/StateComponents';
+import { formatTimestampIST } from '../../utils/timestampUtils';
+
 
 export const IncidentsPage: React.FC = () => {
   const { 
@@ -195,7 +197,7 @@ export const IncidentsPage: React.FC = () => {
 
                     <td className="p-[20px]">
                       <div className="font-semibold text-[var(--primary-navy)]">{inc.id}</div>
-                      <div className="text-[13px] text-[var(--text-muted)]">{new Date(inc.timestamp).toLocaleString()}</div>
+                      <div className="text-[13px] text-[var(--text-muted)]">{formatTimestampIST(inc.timestamp)}</div>
                     </td>
 
                     <td className="p-[20px]">

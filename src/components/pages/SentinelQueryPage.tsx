@@ -16,6 +16,8 @@ import { ThreatScoreBadge } from '../common/ThreatScoreBadge';
 import { parseSentinelQuery, searchIncidentVault } from '../../services/sentinelQueryEngine';
 import type { StructuredSearchFilters } from '../../services/sentinelQueryEngine';
 import { ibvapApi } from '../../services/apiClient';
+import { formatTimestampIST } from '../../utils/timestampUtils';
+
 
 export const SentinelQueryPage: React.FC = () => {
   const { incidents, setSelectedIncident, setExplainableIncident } = useApp();
@@ -206,7 +208,8 @@ export const SentinelQueryPage: React.FC = () => {
                 </p>
 
                 <div className="flex items-center justify-between pt-3 border-t border-[var(--border-color)]">
-                  <span className="text-[12px] text-[var(--text-muted)] font-medium">{inc.timestamp}</span>
+                  <span className="text-[12px] text-[var(--text-muted)] font-medium">{formatTimestampIST(inc.timestamp)}</span>
+
                   <button onClick={() => setSelectedIncident(inc)} className="px-3 py-1.5 bg-slate-50 hover:bg-[#1F5F8B]/5 text-[#1F5F8B] border border-slate-200 rounded font-semibold flex items-center gap-1.5 transition-colors text-[12px]">
                     <Eye className="w-4 h-4" /> View
                   </button>

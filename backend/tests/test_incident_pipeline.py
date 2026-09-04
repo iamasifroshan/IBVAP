@@ -110,7 +110,7 @@ class TestIncidentPipeline(unittest.TestCase):
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode('.jpg', img)
-        for _ in range(4):
+        for _ in range(6):
             response = self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
         
         self.assertEqual(response.status_code, 200)
@@ -136,7 +136,7 @@ class TestIncidentPipeline(unittest.TestCase):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode('.jpg', img)
 
-        for _ in range(4): # Enough frames to pass persistence
+        for _ in range(6): # Enough frames to pass persistence
             response = self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
             self.assertEqual(response.status_code, 200)
 
@@ -148,7 +148,7 @@ class TestIncidentPipeline(unittest.TestCase):
     @patch('services.face_recognition.face_recognition_service.recognize_faces')
     def test_C_same_unknown_track_multiple_frames(self, mock_recognize, mock_track):
         mock_track.return_value = [
-            {"track_id": 11, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}
+            {"track_id": 912, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}
         ]
         mock_recognize.return_value = [
             {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}
@@ -157,7 +157,7 @@ class TestIncidentPipeline(unittest.TestCase):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode('.jpg', img)
         
-        for _ in range(4):
+        for _ in range(6):
             response = self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
             self.assertEqual(response.status_code, 200)
             
@@ -172,11 +172,11 @@ class TestIncidentPipeline(unittest.TestCase):
         mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
         
         mock_track.return_value = [{"track_id": 10, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}]
-        for _ in range(4):
+        for _ in range(6):
             self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
         
         mock_track.return_value = [{"track_id": 11, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}]
-        for _ in range(4):
+        for _ in range(6):
             self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
 
         total_incidents = self.db.query(IncidentModel).filter(IncidentModel.camera_id == "CAM-PIPE-TEST").count()
@@ -196,9 +196,9 @@ class TestIncidentPipeline(unittest.TestCase):
         mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
         mock_track.return_value = [{"track_id": 10, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}]
         
-        for _ in range(4):
+        for _ in range(6):
             self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
-        for _ in range(4):
+        for _ in range(6):
             self.client.post("/api/v1/cameras/CAM-PIPE-TEST-2/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
 
         i1 = self.db.query(IncidentModel).filter(IncidentModel.camera_id == "CAM-PIPE-TEST").count()

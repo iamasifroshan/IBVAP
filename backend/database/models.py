@@ -1,8 +1,12 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from database.db import Base
+
+def _utcnow():
+    """Return current UTC time as a timezone-aware datetime (replaces deprecated datetime.utcnow)."""
+    return datetime.now(timezone.utc)
 
 class CameraModel(Base):
     __tablename__ = "cameras"
@@ -29,7 +33,7 @@ class CameraModel(Base):
     night_vision_mode = Column(Boolean, default=False)
     dehaze_enabled = Column(Boolean, default=False)
     auto_start_inference = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class VideoModel(Base):
     __tablename__ = "videos"
@@ -46,7 +50,7 @@ class VideoModel(Base):
     duration_sec = Column(Float, default=0.0)
     status = Column(String, default="uploaded")
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class DetectionModel(Base):
     __tablename__ = "detections"
@@ -61,7 +65,7 @@ class DetectionModel(Base):
     timestamp_sec = Column(Float, nullable=True)         # seconds into video
     bounding_box = Column(JSON, default=dict)
     face = Column(JSON, nullable=True)  # Associated face recognition metadata
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=_utcnow)
 
 class TrackModel(Base):
     """
@@ -85,7 +89,7 @@ class TrackModel(Base):
     video_ts_first_sec = Column(Float, default=0.0)
     video_ts_last_sec = Column(Float, default=0.0)
     face = Column(JSON, nullable=True)  # Last seen face recognition metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class ZoneModel(Base):
@@ -106,7 +110,7 @@ class ZoneModel(Base):
     vehicle_detection = Column(Boolean, default=False)
     animal_detection = Column(Boolean, default=False)
     person_threshold = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class IncidentModel(Base):
     __tablename__ = "incidents"
@@ -141,7 +145,11 @@ class IncidentModel(Base):
     person_name = Column(String, nullable=True, default="UNKNOWN")
     face_recognized = Column(Boolean, nullable=True, default=False)
     face_confidence = Column(Float, nullable=True, default=0.0)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=_utcnow)
+    # Video source timestamp: seconds into the video file when incident was detected.
+    # None/null for live webcam sources.
+    source_video_timestamp_sec = Column(Float, nullable=True, default=None)
+
 
 class EvidenceModel(Base):
     __tablename__ = "evidence"
@@ -151,7 +159,7 @@ class EvidenceModel(Base):
     evidence_type = Column(String, default="snapshot")
     file_path = Column(String, nullable=False)
     sha256_hash = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class SyncJobModel(Base):
     __tablename__ = "sync_jobs"
@@ -161,7 +169,7 @@ class SyncJobModel(Base):
     status = Column(String, default="queued")
     retry_count = Column(Integer, default=0)
     payload_size_kb = Column(Integer, default=256)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     synced_at = Column(DateTime, nullable=True)
 
 class DatasetModel(Base):
@@ -179,7 +187,7 @@ class DatasetModel(Base):
     status = Column(String, default="DRAFT") # DRAFT, VALIDATED, FAILED
     validation_errors = Column(JSON, default=list)
     storage_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class TrainingJobModel(Base):
     __tablename__ = "training_jobs"
@@ -199,7 +207,7 @@ class TrainingJobModel(Base):
     error_message = Column(Text, nullable=True)
     start_time = Column(DateTime, nullable=True)
     end_time = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 class ModelRegistryModel(Base):
     __tablename__ = "model_registry"
@@ -216,7 +224,7 @@ class ModelRegistryModel(Base):
     map50 = Column(Float, default=0.0)
     map50_95 = Column(Float, default=0.0)
     model_path = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class RegisteredPersonModel(Base):
@@ -229,8 +237,8 @@ class RegisteredPersonModel(Base):
     face_embedding = Column(JSON, nullable=False)  # stored as list of floats
     image_path = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     references = relationship("FaceReferenceModel", back_populates="person", cascade="all, delete-orphan")
 
@@ -242,7 +250,7 @@ class FaceReferenceModel(Base):
     person_id = Column(String, ForeignKey("registered_people.person_id"), index=True, nullable=False)
     face_embedding = Column(JSON, nullable=False)  # stored as list of floats
     image_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     person = relationship("RegisteredPersonModel", back_populates="references")
 
@@ -261,7 +269,7 @@ class ANPRObservationModel(Base):
     confidence = Column(Float, default=0.0)
     format_valid = Column(Boolean, default=False)
     direction = Column(String, default="unknown")
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 

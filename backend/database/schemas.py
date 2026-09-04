@@ -177,6 +177,8 @@ class IncidentBase(BaseModel):
     person_name: Optional[str] = "UNKNOWN"
     face_recognized: Optional[bool] = False
     face_confidence: Optional[float] = 0.0
+    # Video source timestamp (seconds into video file). Null for live webcam sources.
+    source_video_timestamp_sec: Optional[float] = None
 
 class IncidentCreate(IncidentBase):
     pass
@@ -211,6 +213,7 @@ class IncidentResponse(IncidentBase):
     personName: Optional[str] = None
     faceRecognized: Optional[bool] = None
     faceConfidence: Optional[float] = None
+    sourceVideoTimestampSec: Optional[float] = None
 
 # Evidence Schemas
 class EvidenceCreate(BaseModel):

@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("api.detections")
 
@@ -495,6 +495,19 @@ async def detect_single_frame(
             
             if best_face is not None and best_face_idx is not None:
                 used_face_indices.add(best_face_idx)
+                raw_identity = best_face.get("identity_status", "KNOWN" if best_face.get("recognized") else "UNKNOWN")
+                face_det_conf = best_face.get("face_detection_confidence", 0.0)
+
+                # ── CLOUD SAFETY GATE ────────────────────────────────────────
+                # YuNet can fire on cloud/background texture with very low
+                # detection confidence. If the face detection confidence is
+                # below the minimum threshold AND the person is not KNOWN,
+                # treat the detection as FACE_UNAVAILABLE (not UNKNOWN).
+                # This prevents cloud frames from generating UNKNOWN incidents.
+                if (raw_identity == "UNKNOWN" and
+                        face_det_conf < settings.FACE_MIN_DETECTION_CONF_FOR_UNKNOWN):
+                    raw_identity = "FACE_UNAVAILABLE"
+
                 det_face = {
                     "recognized": best_face.get("recognized", False),
                     "person_id": best_face.get("person_id"),
@@ -502,11 +515,12 @@ async def detect_single_frame(
                     "identity_code": best_face.get("identity_code"),
                     "confidence": best_face.get("confidence", 0.0),
                     "recognition_confidence": best_face.get("recognition_confidence", best_face.get("confidence", 0.0)),
-                    "face_detection_confidence": best_face.get("face_detection_confidence", 0.0),
+                    "face_detection_confidence": face_det_conf,
                     "confidence_level": best_face.get("confidence_level", "UNKNOWN"),
-                    "identity_status": best_face.get("identity_status", "KNOWN" if best_face.get("recognized") else "UNKNOWN"),
+                    "identity_status": raw_identity,
                     "bounding_box": best_face.get("bounding_box")
                 }
+
             
             if tid is not None:
                 track_registry.update_track(

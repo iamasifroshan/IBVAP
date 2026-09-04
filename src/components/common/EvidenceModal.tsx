@@ -26,6 +26,7 @@ import { Badge } from './Badge';
 import { useApp } from '../../context/AppContext';
 import { evaluateSmartAlert } from '../../services/smartAlertEngine';
 import { API_BASE_URL } from '../../services/apiConfig';
+import { formatVideoTimestamp } from '../../utils/timestampUtils';
 
 interface EvidenceModalProps {
   incident: Incident | null;
@@ -203,7 +204,11 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                     <span className="text-[12px] font-bold text-[#0B1F33] uppercase tracking-wider">Evidence Snapshot</span>
                   </div>
                   <div className="flex items-center gap-4 text-[11px] text-slate-400 font-mono">
-                    <span>Frame #00142</span>
+                    {incident.sourceVideoTimestampSec != null ? (
+                      <span>Video Time: {formatVideoTimestamp(incident.sourceVideoTimestampSec)}</span>
+                    ) : (
+                      <span>Live Capture</span>
+                    )}
                     <span>Captured: {formatTimestamp(capturedTs)}</span>
                   </div>
                 </div>
@@ -245,7 +250,9 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                 {/* Bottom metadata bar */}
                 <div className="px-[16px] py-[10px] border-t border-slate-100 flex items-center justify-between text-[11px] font-mono text-slate-500 bg-slate-50/80">
                   <div className="flex items-center gap-5">
-                    <span>Frame: <b className="text-slate-700">#00142</b></span>
+                    {incident.sourceVideoTimestampSec != null && (
+                      <span>Video Time: <b className="text-slate-700">{formatVideoTimestamp(incident.sourceVideoTimestampSec)}</b></span>
+                    )}
                     <span>Camera: <b className="text-slate-700">{incident.cameraName}</b></span>
                   </div>
                   <div className="flex items-center gap-5">

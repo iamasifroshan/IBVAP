@@ -7,7 +7,7 @@ Uses Ray Casting point-in-polygon algorithm and handles state transition dedupli
 import os
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Tuple, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -254,7 +254,14 @@ class VirtualFenceEngine:
                             person_name=person_name,
                             face_recognized=face_recognized,
                             face_confidence=face_confidence,
-                            timestamp=datetime.utcnow()
+                            timestamp=datetime.now(timezone.utc),
+                            # For video file sources, record video position (seconds).
+                            # For live webcam, timestamp_sec is wall-clock epoch — set None.
+                            source_video_timestamp_sec=(
+                                det.get("timestamp_sec")
+                                if (video_path and det.get("timestamp_sec", 0.0) < 86400)
+                                else None
+                            ),
                         )
                         db.add(db_inc)
                         db.commit()

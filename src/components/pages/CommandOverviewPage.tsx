@@ -8,6 +8,8 @@ import { ibvapApi } from '../../services/apiClient';
 import { Camera as CameraType } from '../../types';
 import type { VehicleStats, ANPRStats } from '../../types';
 import { CameraAnalysisModal } from '../common/CameraAnalysisModal';
+import { formatShortTimeIST } from '../../utils/timestampUtils';
+
 
 // ── DashboardCameraCard ───────────────────────────────────────────────────────
 const DashboardCameraCard: React.FC<{
@@ -336,7 +338,7 @@ export const CommandOverviewPage: React.FC = () => {
                           {inc.severity}
                         </span>
                         <span className="text-[11px] font-semibold text-[var(--text-muted)]">
-                          {new Date(inc.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {formatShortTimeIST(inc.timestamp)} IST
                         </span>
                       </div>
                       <div className="text-[13px] font-bold text-[#0B1F33] truncate mt-1.5">{((inc as any).type || inc.objectType || 'Alert').replace(/_/g, ' ')}</div>

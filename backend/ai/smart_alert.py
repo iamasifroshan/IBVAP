@@ -15,8 +15,9 @@ from database.models import IncidentModel, DetectionModel
 logger = logging.getLogger("ibvap.smart_alert")
 
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from config import settings
+
 
 class SmartAlertConfig:
     """Configurable decision thresholds for SmartAlert engine."""
@@ -120,10 +121,13 @@ class SmartAlertService:
         }
 
         # ── Rule 5: Duplicate Suppression ──
+        # Gate 1: In-memory state transition (fast path — same session)
         duplicate_passed = is_first_entry
         if duplicate_passed and db is not None and track_id is not None:
-            from datetime import timedelta
-            time_threshold = datetime.utcnow() - timedelta(seconds=self.config.duplicate_suppression_window_sec)
+            # Gate 2: DB-level check — protects across server restarts.
+            # SQLite stores naive UTC strings, so we compare with naive UTC.
+            now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+            time_threshold = now_utc_naive - timedelta(seconds=self.config.duplicate_suppression_window_sec)
             # Check if there is an existing active incident for this camera and track within the duplicate window
             existing_inc = db.query(IncidentModel).filter(
                 IncidentModel.camera_id == camera_id,
@@ -133,12 +137,14 @@ class SmartAlertService:
             if existing_inc is not None:
                 duplicate_passed = False
 
+
         checks["rule5_duplicate_suppression"] = {
             "passed": duplicate_passed,
             "rule": "First entry state transition for target",
             "actual": "First entry" if duplicate_passed else "Already inside (loitering)",
             "status": "PASSED" if duplicate_passed else "SUPPRESSED_DUPLICATE"
         }
+
 
         # ── Rule 6: Bounding Box Quality ──
         bbox_passed = True
@@ -229,6 +235,10 @@ class SmartAlertService:
         
         if face_metadata:
             identity_status = face_metadata.get("identity_status")
+            face_det_conf = face_metadata.get("face_detection_confidence")
+            if face_det_conf is None or face_det_conf == 0.0:
+                face_det_conf = face_metadata.get("confidence", 0.0)
+            
             if not identity_status:
                 if face_metadata.get("recognized"):
                     identity_status = "KNOWN"
@@ -236,6 +246,11 @@ class SmartAlertService:
                     identity_status = "UNKNOWN"
                 else:
                     identity_status = "FACE_UNAVAILABLE"
+                    
+            # Prevent false positive clouds: if face detection confidence is too low,
+            # it's just background noise, not an UNKNOWN person's face.
+            if identity_status == "UNKNOWN" and face_det_conf < settings.FACE_MIN_DETECTION_CONF_FOR_UNKNOWN:
+                identity_status = "FACE_UNAVAILABLE"
 
             face_confidence = face_metadata.get("recognition_confidence", face_metadata.get("confidence", 0.0))
             person_name = face_metadata.get("name")
@@ -323,18 +338,17 @@ class SmartAlertService:
                 f"passed all validation gates. Confidence: {(confidence * 100):.1f}%, "
                 f"Persistence: {frames_seen} frames, Zone: '{zone_name}'. Identity: {id_text}."
             )
-        elif not face_passed and face_recognized:
-            explanation = f"SmartAlert SUPPRESSED: Known person authorized ({person_name})."
-        elif not face_passed and not body_passed:
-            explanation = (
-                f"SmartAlert SUPPRESSED: Face identity state is {identity_status}. "
-                f"Automatic intrusion incident not triggered without confirmed UNKNOWN identity."
-            )
+        elif not conf_passed:
+            explanation = "SmartAlert SUPPRESSED: YOLO confidence below threshold."
+        elif not track_id_passed:
+            explanation = "SmartAlert SUPPRESSED: Object lacking persistent tracker ID."
         elif not persistence_passed:
             explanation = (
                 f"SmartAlert REJECTED (Transient Noise): Single-frame flicker "
                 f"({frames_seen} frame < {self.config.min_valid_frames} min required)."
             )
+        elif not zone_passed:
+            explanation = "SmartAlert SUPPRESSED: Target is outside restricted security zones."
         elif not duplicate_passed:
             explanation = (
                 f"SmartAlert SUPPRESSED (Duplicate): TRK#{track_id} already has an active "
@@ -344,6 +358,13 @@ class SmartAlertService:
             explanation = (
                 f"SmartAlert REJECTED (False Positive): Bounding box geometry invalid. "
                 f"Likely background noise/cloud ({bbox_actual})."
+            )
+        elif not face_passed and face_recognized:
+            explanation = f"SmartAlert SUPPRESSED: Known person authorized ({person_name})."
+        elif not face_passed and not body_passed:
+            explanation = (
+                f"SmartAlert SUPPRESSED: Face identity state is {identity_status}. "
+                f"Automatic intrusion incident not triggered without confirmed UNKNOWN identity."
             )
         else:
             failed_rules = [k for k, v in checks.items() if isinstance(v, dict) and not v.get("passed")]

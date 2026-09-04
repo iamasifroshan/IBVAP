@@ -82,6 +82,7 @@ export interface Incident {
   faceRecognized?: boolean;
   face_confidence?: number;
   faceConfidence?: number;
+  sourceVideoTimestampSec?: number;
 }
 
 export interface Camera {
