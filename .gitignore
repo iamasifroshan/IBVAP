@@ -49,8 +49,13 @@ backend/storage/training_uploads/*
 backend/storage/videos/*
 !backend/storage/videos/.gitkeep
 
-# Environment files
+# Local Environment Variables
 .env
 .env.local
 .env.*.local
 
+# Scratch / temp files (never commit these)
+pytest_out.txt
+scratch_fakes.txt
+backend/ibvap_test_runtime.db
+backend/ibvap.db.backup
