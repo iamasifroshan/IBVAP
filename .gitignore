@@ -50,6 +50,7 @@ backend/storage/videos/*
 !backend/storage/videos/.gitkeep
 
 # Environment files
+.env
 .env.local
 .env.*.local
 

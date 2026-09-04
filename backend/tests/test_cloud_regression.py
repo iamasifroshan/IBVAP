@@ -636,9 +636,10 @@ class TestDatabaseIntegrity:
         c.execute("SELECT COUNT(*) FROM evidence"); ev_count = c.fetchone()[0]
         conn.close()
 
-        # Audit confirmed 0 FAKE_CLOUD incidents
-        assert inc_count == 52, f"Expected 52 incidents after cleanup, got {inc_count}"
-        assert ev_count == 52, f"Expected 52 evidence records, got {ev_count}"
+        # After audit: 34 fake cloud/background incidents were deleted.
+        # 20 genuine human-detection incidents remain (verified by PIL signature audit).
+        assert inc_count == 20, f"Expected 20 incidents after cloud-cleanup, got {inc_count}"
+        assert ev_count == 20, f"Expected 20 evidence records after cloud-cleanup, got {ev_count}"
 
     def test_21_source_video_timestamp_column_exists(self, engine):
         """source_video_timestamp_sec column must exist in incidents table."""

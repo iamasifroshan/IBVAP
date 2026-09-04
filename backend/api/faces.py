@@ -3,7 +3,7 @@ import uuid
 import cv2
 import numpy as np
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -220,7 +220,7 @@ async def update_person(
         )
         db.add(db_ref)
 
-    db_person.updated_at = datetime.utcnow()
+    db_person.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(db_person)
     return _enrich_person_response(db_person)
@@ -273,7 +273,7 @@ async def add_face_reference(
     )
     db.add(db_ref)
 
-    db_person.updated_at = datetime.utcnow()
+    db_person.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(db_ref)
 

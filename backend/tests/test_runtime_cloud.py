@@ -9,6 +9,8 @@ import numpy as np
 
 engine = create_engine("sqlite:///ibvap_test_runtime.db", connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Always start from a fresh schema — prevents stale-column failures after migrations
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 def override_get_db():

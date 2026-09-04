@@ -10,7 +10,7 @@ import cv2
 import hashlib
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
@@ -148,7 +148,7 @@ class EvidenceGenerator:
             evidence_type="snapshot",
             file_path=file_path,
             sha256_hash=sha256_hash,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_ev)
         db.commit()
@@ -220,7 +220,7 @@ class EvidenceGenerator:
             evidence_type="clip",
             file_path=file_path,
             sha256_hash=sha256_hash,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_ev)
         db.commit()

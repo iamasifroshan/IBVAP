@@ -56,6 +56,9 @@ class TestIncidentPipeline(unittest.TestCase):
         from ai.fence import fence_engine
         fence_engine._track_zone_states.clear()
 
+        from ai.smart_alert import _recent_alerts
+        _recent_alerts.clear()
+
 
         self.zone = ZoneModel(
             id=str(uuid.uuid4()),
@@ -105,7 +108,7 @@ class TestIncidentPipeline(unittest.TestCase):
             {"track_id": 10, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}
         ]
         mock_recognize.return_value = [
-            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}
+            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "face_detection_confidence": 0.8, "bounding_box": [110, 110, 20, 20]}
         ]
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
@@ -114,6 +117,7 @@ class TestIncidentPipeline(unittest.TestCase):
             response = self.client.post("/api/v1/cameras/CAM-PIPE-TEST/detect-frame", files={"file": ("frame.jpg", img_encoded.tobytes(), "image/jpeg")})
         
         self.assertEqual(response.status_code, 200)
+        print("TEST_B RESPONSE DATA:", response.json())
         
         all_inc = self.db.query(IncidentModel).all()
         for i in all_inc:
@@ -151,7 +155,7 @@ class TestIncidentPipeline(unittest.TestCase):
             {"track_id": 912, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}
         ]
         mock_recognize.return_value = [
-            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}
+            {"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "face_detection_confidence": 0.8, "bounding_box": [110, 110, 20, 20]}
         ]
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
@@ -169,7 +173,7 @@ class TestIncidentPipeline(unittest.TestCase):
     def test_D_different_unknown_track(self, mock_recognize, mock_track):
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode('.jpg', img)
-        mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
+        mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "face_detection_confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
         
         mock_track.return_value = [{"track_id": 10, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}]
         for _ in range(6):
@@ -193,7 +197,7 @@ class TestIncidentPipeline(unittest.TestCase):
 
         img = np.zeros((320, 320, 3), dtype=np.uint8)
         _, img_encoded = cv2.imencode('.jpg', img)
-        mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
+        mock_recognize.return_value = [{"recognized": False, "person_id": None, "name": "UNKNOWN", "confidence": 0.8, "face_detection_confidence": 0.8, "bounding_box": [110, 110, 20, 20]}]
         mock_track.return_value = [{"track_id": 10, "fine_class": "person", "object_type": "human", "confidence": 0.95, "bounding_box": {"x": 0.3, "y": 0.3, "width": 0.1, "height": 0.1}, "bbox_pixels": {"x1": 100, "y1": 100, "x2": 120, "y2": 120}}]
         
         for _ in range(6):

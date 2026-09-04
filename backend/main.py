@@ -276,17 +276,29 @@ app.add_middleware(
 
 from fastapi.staticfiles import StaticFiles
 
+class CORSStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        async def custom_send(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                # Add CORS headers
+                headers.append((b"access-control-allow-origin", b"*"))
+                headers.append((b"access-control-allow-methods", b"*"))
+                headers.append((b"access-control-allow-headers", b"*"))
+            await send(message)
+        await super().__call__(scope, receive, custom_send)
+
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "evidence")
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
-app.mount("/storage/evidence", StaticFiles(directory=EVIDENCE_DIR), name="evidence_storage")
+app.mount("/storage/evidence", CORSStaticFiles(directory=EVIDENCE_DIR), name="evidence_storage")
 
 VIDEOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "videos")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
-app.mount("/videos", StaticFiles(directory=VIDEOS_DIR), name="video_storage")
+app.mount("/videos", CORSStaticFiles(directory=VIDEOS_DIR), name="video_storage")
 
 FACES_DIR = settings.FACE_STORAGE_DIR
 os.makedirs(FACES_DIR, exist_ok=True)
-app.mount("/storage/faces", StaticFiles(directory=FACES_DIR), name="faces_storage")
+app.mount("/storage/faces", CORSStaticFiles(directory=FACES_DIR), name="faces_storage")
 
 # Health check endpoint
 @app.get("/health", tags=["Health"])

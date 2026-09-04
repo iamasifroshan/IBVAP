@@ -5,7 +5,7 @@ import uuid
 import yaml
 import shutil
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from ultralytics import YOLO
 
 from database.db import SessionLocal
@@ -27,7 +27,7 @@ def _run_training_subprocess(job_id: str, data_yaml_path: str, epochs: int, batc
 
     try:
         job.status = "RUNNING"
-        job.start_time = datetime.utcnow()
+        job.start_time = datetime.now(timezone.utc)
         db.commit()
 
         # We must change cwd so ultralytics creates 'runs' directory in a manageable place
@@ -68,7 +68,7 @@ def _run_training_subprocess(job_id: str, data_yaml_path: str, epochs: int, batc
         job.status = "FAILED"
         job.error_message = str(e)
     finally:
-        job.end_time = datetime.utcnow()
+        job.end_time = datetime.now(timezone.utc)
         db.commit()
         db.close()
 

@@ -157,7 +157,7 @@ def run_yolo_detection_with_tracking(
             raise HTTPException(status_code=500, detail=f"YOLO+ByteTrack failure: {str(err)}")
 
     # ── Persist detections to SQLite ──
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     det_records = []
     for det in results["detections"]:
         det_records.append(DetectionModel(
@@ -447,7 +447,7 @@ async def detect_single_frame(
     
     counter = _webcam_frame_counters.get(camera_id, 0)
     _webcam_frame_counters[camera_id] = counter + 1
-    current_ts = datetime.utcnow().timestamp()
+    current_ts = datetime.now(timezone.utc).timestamp()
 
     # Check if there are any persons detected before running heavy Face Recognition
     has_person = any(d.get("fine_class") == "person" or d.get("object_type") == "human" for d in raw_detections)
@@ -604,8 +604,8 @@ async def detect_single_frame(
     if fence_dets and zones:
         created_incidents = fence_engine.evaluate_frame_detections(
             camera_id=cam.camera_id,
-            frame_index=int(datetime.utcnow().timestamp()),
-            timestamp_sec=datetime.utcnow().timestamp(),
+            frame_index=int(datetime.now(timezone.utc).timestamp()),
+            timestamp_sec=datetime.now(timezone.utc).timestamp(),
             detections=fence_dets,
             zones=zones,
             db=db
@@ -689,7 +689,7 @@ async def detect_single_frame(
                             ANPRObservationModel.plate_text == v_rec.plate_text
                         ).first()
 
-                        now_dt = datetime.utcnow()
+                        now_dt = datetime.now(timezone.utc)
                         if existing_obs:
                             existing_obs.last_seen = now_dt
                             existing_obs.direction = v_rec.compute_direction()
@@ -777,7 +777,7 @@ async def detect_single_frame(
                 pass
 
     return {
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "person_count": len(person_dets),
         "detections": person_dets,
         "vehicle_count": len(vehicle_dets_out),

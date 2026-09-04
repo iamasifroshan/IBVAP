@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
+import cv2
+import time
 
 from database.db import get_db
 from database.models import CameraModel
@@ -232,5 +235,54 @@ def update_camera_inference_auto_start(
     db.refresh(c)
     return map_camera_to_response(c)
 
+def generate_mjpeg_stream(camera: CameraModel):
+    verify = stream_manager.verify_camera_source(camera.source_url, camera.source_type)
+    if verify["status"] != "ONLINE" and verify["status"] != "DEGRADED":
+        # Fallback empty stream
+        pass
+    
+    url = stream_manager.resolve_rtsp_url(camera.source_url) if camera.source_type == "RTSP" else stream_manager.resolve_video_path(camera.source_url)
+    if not url and camera.source_type == "WEBCAM":
+        idx = stream_manager.parse_webcam_index(camera.source_url)
+        url = idx
 
+    cap = cv2.VideoCapture(url)
+    if camera.source_type == "RTSP":
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+        
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                time.sleep(1)
+                cap.release()
+                cap = cv2.VideoCapture(url)
+                if camera.source_type == "RTSP":
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+                continue
+            
+            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            if camera.source_type == "SIMULATED_FILE":
+                time.sleep(1 / (camera.fps or 30.0))
+    finally:
+        cap.release()
 
+@router.get("/{camera_id}/stream")
+def get_camera_stream(camera_id: str, db: Session = Depends(get_db)):
+    """
+    MJPEG stream endpoint for frontend viewing.
+    """
+    c = db.query(CameraModel).filter(
+        (CameraModel.camera_id == camera_id) | (CameraModel.id == camera_id)
+    ).first()
+    if not c:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+        
+    return StreamingResponse(
+        generate_mjpeg_stream(c),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )

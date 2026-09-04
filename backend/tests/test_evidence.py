@@ -3,7 +3,7 @@ import sys
 import os
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add parent directory to sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,7 +53,7 @@ class TestEvidenceGenerator(unittest.TestCase):
             zone_name="Sector B Zero-Tolerance Zone",
             smart_alert_confirmed=True,
             explainable_reason="Test evidence snapshot generation",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         self.db.add(inc)
         self.db.commit()
@@ -91,7 +91,7 @@ class TestEvidenceGenerator(unittest.TestCase):
             zone_name="Sector B Zero-Tolerance Zone",
             smart_alert_confirmed=True,
             explainable_reason="Test video clip generation",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         self.db.add(inc)
         self.db.commit()

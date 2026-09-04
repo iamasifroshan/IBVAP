@@ -323,8 +323,10 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
     const loop = () => {
       const video = videoRef.current;
       if (video) {
-        setCurrentTimeStr(formatTime(video.currentTime));
-        setProgressPct((video.currentTime / (video.duration || 1)) * 100);
+        const cTime = 'currentTime' in video ? (video as any).currentTime : ((Date.now() - startTimeRef.current) / 1000);
+        const duration = 'duration' in video ? (video as any).duration : 1;
+        setCurrentTimeStr(formatTime(cTime));
+        setProgressPct((cTime / (duration || 1)) * 100);
       }
       drawOverlay();
       animFrameRef.current = requestAnimationFrame(loop);
@@ -349,25 +351,24 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
     console.log(`[MODAL DEBUG] videoReady=${video.readyState}`);
     console.log(`[MODAL DEBUG] videoSize=${video.videoWidth}x${video.videoHeight}`);
 
-    // Video must have at least one decoded frame and real dimensions
-    if (
-      video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
-      video.videoWidth === 0 ||
-      video.videoHeight === 0
-    ) {
-      // Try to resume playback if the video has stalled
-      if (video.paused && !video.ended) {
-        video.play().catch(() => {});
-      }
-      console.log(`[CAMERA_ANALYSIS] VIDEO_NOT_READY readyState=${video.readyState} w=${video.videoWidth} h=${video.videoHeight} paused=${video.paused}`);
-      return;
-    }
-
-    const W = video.videoWidth;
-    const H = video.videoHeight;
+    const W = (video as any).videoWidth ?? (video as any).naturalWidth ?? 0;
+    const H = (video as any).videoHeight ?? (video as any).naturalHeight ?? 0;
     const camId = (camera as any).camera_id || camera.id;
 
     console.log(`[CAMERA_ANALYSIS] FRAME_CAPTURE_START cam=${camId} video=${W}x${H} readyState=${video.readyState}`);
+
+    // Video must have at least one decoded frame and real dimensions
+    if (
+      (video instanceof HTMLVideoElement && video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) ||
+      W === 0 ||
+      H === 0
+    ) {
+      // Try to resume playback if the video has stalled
+      if (video instanceof HTMLVideoElement && video.paused && !video.ended) {
+        video.play().catch(() => {});
+      }
+      return;
+    }
 
     console.log('[MODAL DEBUG] captureStart');
     const tempCanvas = document.createElement('canvas');
@@ -466,19 +467,20 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
           console.log('[MODAL DEBUG] stateUpdate');
           // Add timeline event (deduplicated within 1.5s)
           if (pCount > 0 || vCount > 0) {
-            const timeLabel = formatTime(video.currentTime || 0);
+            const vTime = 'currentTime' in video ? (video as any).currentTime : ((Date.now() - startTimeRef.current) / 1000);
+            const timeLabel = formatTime(vTime || 0);
             const evType: 'detection' | 'vehicle' | 'alert' =
               hasIncidents ? 'alert' : (pCount > 0 ? 'detection' : 'vehicle');
             setTimeline(prev => {
               const last = prev[prev.length - 1];
               const desc = `${pCount} Human(s)${vCount > 0 ? `, ${vCount} Vehicle(s)` : ''} detected`;
-              if (last && Math.abs(last.timestampSec - (video.currentTime || 0)) < 1.5 && last.description === desc) {
+              if (last && Math.abs(last.timestampSec - (vTime || 0)) < 1.5 && last.description === desc) {
                 return prev;
               }
               return [...prev, {
                 type: evType,
                 timeStr: timeLabel,
-                timestampSec: video.currentTime || 0,
+                timestampSec: vTime || 0,
                 trackId: persons[0]?.track_id || (vehicles[0] as any)?.track_id || null,
                 description: desc,
                 confidence: maxC || undefined,
@@ -521,8 +523,12 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
 
     const video = videoRef.current;
     if (video) {
-      video.currentTime = 0;
-      video.play().catch(e => console.warn('[CAMERA_ANALYSIS] VIDEO_PLAY_REJECTED', e));
+      if ('currentTime' in video) {
+        (video as any).currentTime = 0;
+      }
+      if (typeof (video as any).play === 'function') {
+        (video as any).play().catch((e: any) => console.warn('[CAMERA_ANALYSIS] VIDEO_PLAY_REJECTED', e));
+      }
     }
 
     // Always clear any existing interval before starting a new one
@@ -556,8 +562,12 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
     setTimeline([]);
     setStages(prev => prev.map(s => ({ ...s, state: 'idle' })));
     if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
+      if (typeof (videoRef.current as any).pause === 'function') {
+        (videoRef.current as any).pause();
+      }
+      if ('currentTime' in videoRef.current) {
+        (videoRef.current as any).currentTime = 0;
+      }
     }
     const canvas = canvasRef.current;
     if (canvas) {
@@ -672,43 +682,53 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
 
           {/* Video + Canvas */}
           <div className="lg:w-[70%] bg-black relative flex items-center justify-center shrink-0" style={{ minHeight: '380px' }}>
-            <video
-              ref={(el) => {
-                videoRef.current = el;
-                if (el && !(el as any)._listenersAttached) {
-                  (el as any)._listenersAttached = true;
-                  const logEvent = (e: Event) => {
-                    console.log(`[VIDEO_EVENT] ${e.type}`, {
-                      networkState: el.networkState,
-                      readyState: el.readyState,
-                      currentSrc: el.currentSrc,
-                      videoWidth: el.videoWidth,
-                      videoHeight: el.videoHeight,
-                      error: el.error ? { code: el.error.code, message: el.error.message } : null
+            {videoUrl && videoUrl.includes('/stream') ? (
+              <img
+                ref={(el) => {
+                  if (el) (videoRef as any).current = el; // Hack to allow canvas drawImage
+                }}
+                src={videoUrl}
+                crossOrigin="anonymous"
+                className="w-full h-full object-contain"
+                style={{ maxHeight: '500px' }}
+                onError={(e) => {
+                  setErrorMessage(`Camera stream unavailable: ${videoUrl}`);
+                  setStatus('ERROR');
+                }}
+              />
+            ) : (
+              <video
+                ref={(el) => {
+                  (videoRef as any).current = el;
+                  if (el && !(el as any)._listenersAttached) {
+                    (el as any)._listenersAttached = true;
+                    const logEvent = (e: Event) => {
+                      console.log(`[VIDEO_EVENT] ${e.type}`, {
+                        networkState: el.networkState,
+                        readyState: el.readyState,
+                        currentSrc: el.currentSrc,
+                        videoWidth: el.videoWidth,
+                        videoHeight: el.videoHeight,
+                        error: el.error ? { code: el.error.code, message: el.error.message } : null
+                      });
+                    };
+                    ['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough','play','error','abort','stalled','suspend','emptied'].forEach(evt => {
+                      el.addEventListener(evt, logEvent);
                     });
-                  };
-                  ['loadstart','loadedmetadata','loadeddata','canplay','canplaythrough','play','error','abort','stalled','suspend','emptied'].forEach(evt => {
-                    el.addEventListener(evt, logEvent);
-                  });
-                }
-              }}
-              src={videoUrl ? `${videoUrl}?cors=1` : undefined}
-              crossOrigin="anonymous"
-              className="w-full h-full object-contain"
-              style={{ maxHeight: '500px' }}
-              autoPlay muted loop playsInline preload="auto"
-              onError={(e) => {
-                const target = e.target as HTMLVideoElement;
-                console.error('[VIDEO_ERROR_HANDLER]', {
-                  networkState: target.networkState,
-                  readyState: target.readyState,
-                  currentSrc: target.currentSrc,
-                  error: target.error ? { code: target.error.code, message: target.error.message } : null
-                });
-                setErrorMessage(`Video failed to load: ${videoUrl}`);
-                setStatus('ERROR');
-              }}
-            />
+                  }
+                }}
+                src={videoUrl ? `${videoUrl}?cors=1` : undefined}
+                crossOrigin="anonymous"
+                className="w-full h-full object-contain"
+                style={{ maxHeight: '500px' }}
+                autoPlay muted loop playsInline preload="auto"
+                onError={(e) => {
+                  const target = e.target as HTMLVideoElement;
+                  setErrorMessage(`Video failed to load: ${videoUrl}`);
+                  setStatus('ERROR');
+                }}
+              />
+            )}
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
             {status === 'ANALYZING' && framesAnalyzed === 0 && (

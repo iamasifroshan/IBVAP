@@ -9,14 +9,14 @@ import logging
 from typing import Dict, Any, Tuple, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from datetime import datetime, timezone, timedelta
 
 from database.models import IncidentModel, DetectionModel
+from config import settings
 
 logger = logging.getLogger("ibvap.smart_alert")
 
-
-from datetime import datetime, timezone, timedelta
-from config import settings
+_recent_alerts: Dict[str, float] = {}
 
 
 class SmartAlertConfig:
@@ -121,14 +121,18 @@ class SmartAlertService:
         }
 
         # ── Rule 5: Duplicate Suppression ──
-        # Gate 1: In-memory state transition (fast path — same session)
-        duplicate_passed = is_first_entry
+        # ── Rule 5: Duplicate Suppression ──
+        # Gate 1: In-memory cache
+        cache_key = f"{camera_id}_{track_id}"
+        now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_ts = now_utc_naive.timestamp()
+        
+        last_alert = _recent_alerts.get(cache_key, 0.0)
+        duplicate_passed = (now_ts - last_alert) > self.config.duplicate_suppression_window_sec
+        
         if duplicate_passed and db is not None and track_id is not None:
             # Gate 2: DB-level check — protects across server restarts.
-            # SQLite stores naive UTC strings, so we compare with naive UTC.
-            now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
             time_threshold = now_utc_naive - timedelta(seconds=self.config.duplicate_suppression_window_sec)
-            # Check if there is an existing active incident for this camera and track within the duplicate window
             existing_inc = db.query(IncidentModel).filter(
                 IncidentModel.camera_id == camera_id,
                 (IncidentModel.track_id == f"TRK#{track_id}") | (IncidentModel.track_id == str(track_id)),
@@ -136,12 +140,12 @@ class SmartAlertService:
             ).first()
             if existing_inc is not None:
                 duplicate_passed = False
-
+                _recent_alerts[cache_key] = now_ts
 
         checks["rule5_duplicate_suppression"] = {
             "passed": duplicate_passed,
-            "rule": "First entry state transition for target",
-            "actual": "First entry" if duplicate_passed else "Already inside (loitering)",
+            "rule": "Not recently suppressed",
+            "actual": "No recent incident" if duplicate_passed else "Already alerted recently",
             "status": "PASSED" if duplicate_passed else "SUPPRESSED_DUPLICATE"
         }
 
@@ -327,6 +331,11 @@ class SmartAlertService:
             face_passed and 
             body_passed
         )
+
+        if all_passed:
+            _recent_alerts[cache_key] = now_ts
+        else:
+            print(f"DEBUG SMART ALERT FAILED for {camera_id} {track_id}: {[(k, v['actual']) for k,v in checks.items() if not v['passed']]}")
 
         checks["decision"] = "CONFIRMED_INCIDENT" if all_passed else "REJECTED_UNCONFIRMED"
 

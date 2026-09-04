@@ -1,7 +1,7 @@
 import unittest
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add parent directory to sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -50,7 +50,7 @@ class TestEdgeSyncEngine(unittest.TestCase):
             zone_name="Sector B Restricted Zone",
             smart_alert_confirmed=True,
             explainable_reason="Local edge detection while offline",
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         self.db.add(inc)
         self.db.commit()

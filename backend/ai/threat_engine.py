@@ -6,7 +6,7 @@ Does NOT pretend to be an unexplainable black-box machine learning model.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Optional
 from config import settings
 
@@ -60,7 +60,7 @@ class BorderThreatEngine:
 
         # Resolve time of day
         if time_hour_utc is None:
-            time_hour_utc = datetime.utcnow().hour
+            time_hour_utc = datetime.now(timezone.utc).hour
 
         # 1. Object Type Scoring
         obj_type_lower = (object_type or "human").lower()

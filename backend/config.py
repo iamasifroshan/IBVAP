@@ -9,6 +9,13 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
     STORAGE_DIR: str = os.getenv("STORAGE_DIR", os.path.normpath(os.path.join(_base_dir, "storage")))
     
+    # CCTV RTSP Credentials
+    RTSP_USERNAME: str = os.getenv("RTSP_USERNAME", "")
+    RTSP_PASSWORD: str = os.getenv("RTSP_PASSWORD", "")
+    RTSP_HOST: str = os.getenv("RTSP_HOST", "")
+    RTSP_PORT: str = os.getenv("RTSP_PORT", "554")
+    RTSP_CHANNEL: str = os.getenv("RTSP_CHANNEL", "101")
+    
     # Face Recognition Configurations
     FACE_RECOGNITION_THRESHOLD: float = float(os.getenv("FACE_RECOGNITION_THRESHOLD", "0.363"))
     FACE_RECOGNITION_HIGH_CONFIDENCE: float = float(os.getenv("FACE_RECOGNITION_HIGH_CONFIDENCE", "0.60"))

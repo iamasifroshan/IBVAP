@@ -50,7 +50,7 @@ export const LiveSurveillancePage: React.FC = () => {
   const [vehicleDetections, setVehicleDetections] = useState<any[]>([]);
 
   // Canvas / Video Refs
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const webcamStreamRef = useRef<MediaStream | null>(null);
   const inferenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -118,8 +118,8 @@ export const LiveSurveillancePage: React.FC = () => {
       webcamStreamRef.current.getTracks().forEach(track => track.stop());
       webcamStreamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    if (videoRef.current && 'srcObject' in videoRef.current) {
+      (videoRef.current as HTMLVideoElement).srcObject = null;
     }
     webcamActiveRef.current = false;
     isInferenceInFlightRef.current = false;
@@ -148,7 +148,7 @@ export const LiveSurveillancePage: React.FC = () => {
 
   // ── Start Browser Webcam ──────────────────────────────────────────────────
   const startWebcam = useCallback(async (): Promise<boolean> => {
-    if (webcamStreamRef.current && webcamActiveRef.current && videoRef.current && videoRef.current.srcObject) {
+    if (webcamStreamRef.current && webcamActiveRef.current && videoRef.current && 'srcObject' in videoRef.current && (videoRef.current as HTMLVideoElement).srcObject) {
       // Stream is already active — reuse it without stopping
       return true;
     }
@@ -176,9 +176,9 @@ export const LiveSurveillancePage: React.FC = () => {
         return false;
       }
       webcamStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(e => console.warn("Failed to autoplay webcam:", e));
+      if (videoRef.current && 'srcObject' in videoRef.current) {
+        (videoRef.current as HTMLVideoElement).srcObject = stream;
+        (videoRef.current as HTMLVideoElement).play().catch(e => console.warn("Failed to autoplay webcam:", e));
       }
       setWebcamConnecting(false);
       webcamActiveRef.current = true;
@@ -202,11 +202,11 @@ export const LiveSurveillancePage: React.FC = () => {
 
   // ── Ensure video element remains bound to webcamStreamRef across renders ──
   useEffect(() => {
-    if (feedSource === 'WEBCAM' && webcamActive && videoRef.current && webcamStreamRef.current) {
-      if (videoRef.current.srcObject !== webcamStreamRef.current) {
-        videoRef.current.srcObject = webcamStreamRef.current;
+    if (feedSource === 'WEBCAM' && webcamActive && videoRef.current && webcamStreamRef.current && 'srcObject' in videoRef.current) {
+      if ((videoRef.current as HTMLVideoElement).srcObject !== webcamStreamRef.current) {
+        (videoRef.current as HTMLVideoElement).srcObject = webcamStreamRef.current;
       }
-      videoRef.current.play().catch(() => {});
+      (videoRef.current as HTMLVideoElement).play().catch(() => {});
     }
   }, [feedSource, webcamActive]);
 
@@ -255,12 +255,12 @@ export const LiveSurveillancePage: React.FC = () => {
       });
     } else {
       stopWebcam();
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
+      if (videoRef.current && 'srcObject' in videoRef.current) {
+        (videoRef.current as HTMLVideoElement).srcObject = null;
       }
       if (activeCamera.autoStartInference && !isDetecting) {
-        if (videoRef.current && videoRef.current.paused) {
-           videoRef.current.play().catch(()=>{});
+        if (videoRef.current && 'paused' in videoRef.current && (videoRef.current as HTMLVideoElement).paused) {
+           (videoRef.current as HTMLVideoElement).play().catch(()=>{});
         }
         setIsDetecting(true);
         inferenceIntervalRef.current = setInterval(() => {
@@ -286,8 +286,8 @@ export const LiveSurveillancePage: React.FC = () => {
 
     // Setup composited canvas
     const compositeCanvas = document.createElement('canvas');
-    compositeCanvas.width = video.videoWidth || video.clientWidth || 640;
-    compositeCanvas.height = video.videoHeight || video.clientHeight || 480;
+    compositeCanvas.width = (video as any).videoWidth || (video as HTMLImageElement).naturalWidth || video.clientWidth || 640;
+    compositeCanvas.height = (video as any).videoHeight || (video as HTMLImageElement).naturalHeight || video.clientHeight || 480;
     const ctx = compositeCanvas.getContext('2d');
     if (!ctx) return;
 
@@ -494,8 +494,11 @@ export const LiveSurveillancePage: React.FC = () => {
     const video = videoRef.current;
     if (!video || !isMountedRef.current) return;
 
-    // Guard: video must have actual frame data and dimensions
-    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth === 0 || video.videoHeight === 0) {
+    // Guard: video must have actual frame data and dimensions (img element for MJPEG)
+    const isVideoEl = 'readyState' in video;
+    const vW = (video as any).videoWidth || (video as HTMLImageElement).naturalWidth;
+    const vH = (video as any).videoHeight || (video as HTMLImageElement).naturalHeight;
+    if ((isVideoEl && (video as any).readyState < HTMLMediaElement.HAVE_CURRENT_DATA) || vW === 0 || vH === 0) {
       return;
     }
 
@@ -521,12 +524,12 @@ export const LiveSurveillancePage: React.FC = () => {
     const isDebugLog = seq <= 3 || seq % 50 === 0;
 
     if (isDebugLog) {
-      console.log(`[INFERENCE #${seq}] 1. tick | video=${video.videoWidth}x${video.videoHeight} readyState=${video.readyState}`);
+      console.log(`[INFERENCE #${seq}] 1. tick | video=${vW}x${vH}`);
     }
 
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = video.videoWidth;
-    tempCanvas.height = video.videoHeight;
+    tempCanvas.width = vW;
+    tempCanvas.height = vH;
     const tempCtx = tempCanvas.getContext('2d');
     if (!tempCtx) {
       isInferenceInFlightRef.current = false;
@@ -679,8 +682,8 @@ export const LiveSurveillancePage: React.FC = () => {
         });
       } else {
         // Ensure the simulated/uploaded video is actually playing before starting inference
-        if (feedSource !== 'WEBCAM' && videoRef.current && videoRef.current.paused) {
-          videoRef.current.play().catch(() => {});
+        if (feedSource !== 'WEBCAM' && videoRef.current && 'paused' in videoRef.current && (videoRef.current as HTMLVideoElement).paused) {
+          (videoRef.current as HTMLVideoElement).play().catch(() => {});
         }
         startLoop();
       }
@@ -715,10 +718,10 @@ export const LiveSurveillancePage: React.FC = () => {
       const url = URL.createObjectURL(file);
       setUploadedVideoUrl(url);
       setFeedSource('UPLOADED');
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-        videoRef.current.src = url;
-        videoRef.current.play().catch(() => {});
+      if (videoRef.current && 'srcObject' in videoRef.current) {
+        (videoRef.current as HTMLVideoElement).srcObject = null;
+        (videoRef.current as HTMLVideoElement).src = url;
+        (videoRef.current as HTMLVideoElement).play().catch(() => {});
       }
       try {
         const detectId = (activeCamera as any).camera_id || activeCamera.id;
@@ -812,21 +815,35 @@ export const LiveSurveillancePage: React.FC = () => {
                   RETRY
                 </button>
               </div>
-            ) : (
-              <>
-                <video
-                  ref={videoRef}
-                  src={feedSource === 'UPLOADED' && uploadedVideoUrl ? uploadedVideoUrl : (feedSource === 'SIMULATED' ? (ibvapApi.getVideoUrlForCamera(activeCamera) || '') : undefined)}
-                  crossOrigin="anonymous"
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="w-full h-[550px] object-cover"
-                />
-                <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-10" />
-              </>
-            )}
+            ) : (() => {
+              const simUrl = feedSource === 'SIMULATED' ? (ibvapApi.getVideoUrlForCamera(activeCamera) || '') : null;
+              const isMjpeg = simUrl?.includes('/stream');
+              return (
+                <>
+                  {isMjpeg ? (
+                    <img
+                      ref={(el) => { (videoRef as any).current = el; }}
+                      src={simUrl || undefined}
+                      className="w-full h-[550px] object-cover"
+                      onError={() => setCameraError('RTSP stream unavailable — camera may be offline or unreachable.')}
+                      alt="RTSP camera feed"
+                    />
+                  ) : (
+                    <video
+                      ref={(el) => { (videoRef as any).current = el; }}
+                      src={feedSource === 'UPLOADED' && uploadedVideoUrl ? uploadedVideoUrl : (simUrl ?? undefined)}
+                      crossOrigin="anonymous"
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="w-full h-[550px] object-cover"
+                    />
+                  )}
+                  <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-10" />
+                </>
+              );
+            })()}
 
             <div className="absolute top-4 left-4 flex gap-2 z-20">
               <span className="px-3 py-1.5 bg-black/70 backdrop-blur-sm text-white text-xs font-semibold rounded shadow-sm flex items-center gap-2 border border-white/10">

@@ -284,12 +284,16 @@ export const ibvapApi = {
 
   // ── HELPER: GET VIDEO URL ─────────────────────────────────
   getVideoUrlForCamera(camera: Camera): string | null {
+    const host = API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '');
     if (camera.protocol === 'SIMULATED_FILE' || camera.streamUrl?.endsWith('.mp4')) {
       const filename = camera.streamUrl.split(/[/\\]/).pop();
       if (filename) {
-        const host = API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '');
         return `${host}/videos/${filename}`;
       }
+    }
+    // Return MJPEG stream for RTSP or Webcams
+    if (camera.protocol === 'RTSP' || camera.protocol === 'WEBCAM' || camera.streamUrl?.startsWith('rtsp')) {
+      return `${host}/api/v1/cameras/${camera.id}/stream`;
     }
     return null;
   },

@@ -30,10 +30,8 @@ SOURCE_WEBCAM = "WEBCAM"
 SOURCE_RTSP = "RTSP"
 SOURCE_HTTP_STREAM = "HTTP_STREAM"
 
-# Default RTSP credentials from environment — never hardcoded
-DEFAULT_RTSP_URL = os.getenv("IBVAP_DEFAULT_RTSP_URL", "")
-DEFAULT_RTSP_USER = os.getenv("IBVAP_RTSP_USER", "")
-DEFAULT_RTSP_PASS = os.getenv("IBVAP_RTSP_PASS", "")
+# Default RTSP credentials from config
+from config import settings
 
 # Webcam connection timeout frames
 WEBCAM_TEST_FRAMES = 3
@@ -165,11 +163,23 @@ class StreamSourceManager:
     def resolve_rtsp_url(source_url: str) -> str:
         """
         Resolve RTSP URL, injecting credentials from environment variables if not present in URL.
+        Constructs the URL dynamically if RTSP_HOST is configured.
         """
+        if settings.RTSP_HOST and (not source_url or source_url.startswith("rtsp://")):
+            # Construct from env vars
+            user = settings.RTSP_USERNAME
+            pwd = settings.RTSP_PASSWORD
+            host = settings.RTSP_HOST
+            port = settings.RTSP_PORT
+            channel = settings.RTSP_CHANNEL
+            if user and pwd:
+                return f"rtsp://{user}:{pwd}@{host}:{port}/Streaming/Channels/{channel}"
+            return f"rtsp://{host}:{port}/Streaming/Channels/{channel}"
+            
         parsed = urlparse(source_url)
-        if not parsed.username and DEFAULT_RTSP_USER and DEFAULT_RTSP_PASS:
+        if not parsed.username and settings.RTSP_USERNAME and settings.RTSP_PASSWORD:
             # Inject credentials from env
-            netloc = f"{DEFAULT_RTSP_USER}:{DEFAULT_RTSP_PASS}@{parsed.hostname}"
+            netloc = f"{settings.RTSP_USERNAME}:{settings.RTSP_PASSWORD}@{parsed.hostname}"
             if parsed.port:
                 netloc += f":{parsed.port}"
             resolved = parsed._replace(netloc=netloc)

@@ -224,6 +224,7 @@ class VirtualFenceEngine:
                             environmental_condition="normal"
                         )
 
+                        event_dt = datetime.fromtimestamp(det.get("timestamp_sec", 0.0), timezone.utc) if det.get("timestamp_sec", 0.0) > 1000000000 else datetime.now(timezone.utc)
                         db_inc = IncidentModel(
                             id=inc_uuid,
                             incident_id=inc_id_str,
@@ -254,9 +255,7 @@ class VirtualFenceEngine:
                             person_name=person_name,
                             face_recognized=face_recognized,
                             face_confidence=face_confidence,
-                            timestamp=datetime.now(timezone.utc),
-                            # For video file sources, record video position (seconds).
-                            # For live webcam, timestamp_sec is wall-clock epoch — set None.
+                            timestamp=event_dt,
                             source_video_timestamp_sec=(
                                 det.get("timestamp_sec")
                                 if (video_path and det.get("timestamp_sec", 0.0) < 86400)

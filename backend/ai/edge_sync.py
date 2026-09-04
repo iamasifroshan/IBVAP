@@ -9,7 +9,7 @@ continues uninterrupted even when central connectivity is unavailable.
 import logging
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -64,7 +64,7 @@ class EdgeSyncEngine:
             status=initial_status,
             retry_count=0,
             payload_size_kb=340,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             synced_at=None
         )
 
@@ -127,12 +127,12 @@ class EdgeSyncEngine:
             if inc and inc.synced_to_cloud:
                 # Prevent duplicate sync
                 job.status = "synced"
-                job.synced_at = datetime.utcnow()
+                job.synced_at = datetime.now(timezone.utc)
                 db.commit()
                 continue
 
             # Perform payload synchronization simulation
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             now_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
 
             # 3. State Transition: SYNCING -> SYNCED
