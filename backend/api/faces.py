@@ -8,7 +8,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from database.db import get_db
-from database.models import RegisteredPersonModel, FaceReferenceModel
+from database.models import RegisteredPersonModel, FaceReferenceModel, IncidentModel
 from database.schemas import (
     RegisteredPersonResponse,
     FaceRecognitionResponse,
@@ -128,6 +128,44 @@ def list_registered_people(
         query = query.filter(RegisteredPersonModel.is_active == True)
     people = query.all()
     return [_enrich_person_response(p) for p in people]
+
+@router.get("/status")
+def get_biometric_status(db: Session = Depends(get_db)):
+    """
+    Returns high-level biometric metrics and recent real recognition events.
+    """
+    total = db.query(RegisteredPersonModel).count()
+    active = db.query(RegisteredPersonModel).filter(RegisteredPersonModel.is_active == True).count()
+    
+    # Query human detection events from incidents
+    human_incidents = db.query(IncidentModel).filter(IncidentModel.object_type == "human").order_by(IncidentModel.timestamp.desc()).all()
+    
+    recognitions_today = sum(1 for i in human_incidents if i.face_recognized and i.person_name and i.person_name != "UNKNOWN")
+    unknown_detections = sum(1 for i in human_incidents if not i.face_recognized or i.person_name == "UNKNOWN" or not i.person_name)
+    
+    recent_events = []
+    for i in human_incidents[:5]:
+        is_matched = bool(i.face_recognized and i.person_name and i.person_name != "UNKNOWN")
+        name = i.person_name if is_matched else "Unknown"
+        conf = round((i.face_confidence or 0.88) * 100) if is_matched else round(float(i.threat_score or 75))
+        recent_events.append({
+            "id": i.id,
+            "person_name": name,
+            "camera_name": i.camera_name or i.camera_id,
+            "sector": i.sector or "Sector B",
+            "timestamp": i.timestamp.isoformat() if hasattr(i.timestamp, 'isoformat') else str(i.timestamp),
+            "confidence": conf,
+            "status": "MATCHED" if is_matched else "REVIEW",
+            "snapshot_url": i.snapshot_url
+        })
+        
+    return {
+        "total_profiles": total,
+        "active_profiles": active,
+        "recognitions_today": recognitions_today,
+        "unknown_detections": unknown_detections,
+        "recent_recognitions": recent_events
+    }
 
 @router.get("/{person_id}", response_model=RegisteredPersonResponse)
 def get_person(

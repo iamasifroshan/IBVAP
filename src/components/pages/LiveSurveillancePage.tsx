@@ -42,6 +42,10 @@ export const LiveSurveillancePage: React.FC = () => {
   const [webcamStatus, setWebcamStatus] = useState<'NORMAL' | 'ALERT' | 'NO HUMAN DETECTED'>('NO HUMAN DETECTED');
   const [lastDetectionTime, setLastDetectionTime] = useState<string>('Never');
 
+  // ── GATE: Camera only starts after user clicks START LIVE TEST ────────────
+  const [liveTestStarted, setLiveTestStarted] = useState<boolean>(false);
+  const [cameraLifecycle, setCameraLifecycle] = useState<'OFF' | 'READY' | 'STARTING' | 'LIVE' | 'STOPPED' | 'ERROR'>('OFF');
+
   // Real-time YOLO lists
   const [realDetections, setRealDetections] = useState<any[]>([]);
   const [realTracks, setRealTracks] = useState<any[]>([]);
@@ -69,7 +73,7 @@ export const LiveSurveillancePage: React.FC = () => {
   const activeCamera = getCameraById(cameras, activeCameraId);
   const [zonePolygon, setZonePolygon] = useState<ZonePolygon | null>(null);
 
-  // ── Component lifecycle ───────────────────────────────────────────────────
+  // ── Component lifecycle: Ensure ALL tracks stopped upon leaving page ─────────
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -79,8 +83,18 @@ export const LiveSurveillancePage: React.FC = () => {
         inferenceIntervalRef.current = null;
       }
       if (webcamStreamRef.current) {
-        webcamStreamRef.current.getTracks().forEach(t => t.stop());
+        webcamStreamRef.current.getTracks().forEach(t => {
+          t.stop();
+        });
         webcamStreamRef.current = null;
+      }
+      if (videoRef.current && 'srcObject' in videoRef.current) {
+        const vid = videoRef.current as HTMLVideoElement;
+        if (vid && vid.srcObject) {
+          const s = vid.srcObject as MediaStream;
+          s.getTracks().forEach(t => t.stop());
+          vid.srcObject = null;
+        }
       }
     };
   }, []);
@@ -119,7 +133,12 @@ export const LiveSurveillancePage: React.FC = () => {
       webcamStreamRef.current = null;
     }
     if (videoRef.current && 'srcObject' in videoRef.current) {
-      (videoRef.current as HTMLVideoElement).srcObject = null;
+      const vid = videoRef.current as HTMLVideoElement;
+      if (vid && vid.srcObject) {
+        const s = vid.srcObject as MediaStream;
+        s.getTracks().forEach(track => track.stop());
+        vid.srcObject = null;
+      }
     }
     webcamActiveRef.current = false;
     isInferenceInFlightRef.current = false;
@@ -127,6 +146,7 @@ export const LiveSurveillancePage: React.FC = () => {
     setWebcamActive(false);
     setWebcamConnecting(false);
     setIsDetecting(false);
+    setCameraLifecycle('OFF');
     setCameraError(null);
     setWebcamFPS(0);
     setInferenceLatency(0);
@@ -167,6 +187,7 @@ export const LiveSurveillancePage: React.FC = () => {
     inferenceTimestampsRef.current = [];
     setWebcamActive(false);
     setWebcamConnecting(true);
+    setCameraLifecycle('STARTING');
     setCameraError(null);
 
     try {
@@ -183,15 +204,21 @@ export const LiveSurveillancePage: React.FC = () => {
       setWebcamConnecting(false);
       webcamActiveRef.current = true;
       setWebcamActive(true);
+      setCameraLifecycle('LIVE');
       return true;
     } catch (err: any) {
       console.error('Webcam access failed:', err);
+      setCameraLifecycle('ERROR');
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setCameraError('Camera access denied. Enable webcam permission to use Live Surveillance.');
+        setCameraError('Camera permission was denied. Allow camera access and try again.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setCameraError('No webcam detected.');
+        setCameraError('No compatible camera was detected.');
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        setCameraError('The camera is currently being used by another application.');
+      } else if (err.name === 'OverconstrainedError') {
+        setCameraError('Camera does not support the requested resolution. Please try a different camera.');
       } else {
-        setCameraError(`Camera access error: ${err.message || 'Unknown error'}`);
+        setCameraError('Unable to start the selected camera. Please retry.');
       }
       setWebcamConnecting(false);
       webcamActiveRef.current = false;
@@ -240,17 +267,21 @@ export const LiveSurveillancePage: React.FC = () => {
   };
 
   // ── Monitor feed source and camera selector updates ────────────────────────
+  // GATE: Only start webcam/inference when user has explicitly clicked START LIVE TEST
   useEffect(() => {
+    if (!liveTestStarted) {
+      // User has not started the live test — do NOT access camera
+      return;
+    }
+
     if (feedSource === 'WEBCAM') {
       startWebcam().then(success => {
         if (!success) return;
-        if (activeCamera.autoStartInference) {
-          if (!inferenceIntervalRef.current) {
-            setIsDetecting(true);
-            inferenceIntervalRef.current = setInterval(() => {
-              if (runFrameInferenceRef.current) runFrameInferenceRef.current();
-            }, 180);
-          }
+        if (!inferenceIntervalRef.current) {
+          setIsDetecting(true);
+          inferenceIntervalRef.current = setInterval(() => {
+            if (runFrameInferenceRef.current) runFrameInferenceRef.current();
+          }, 180);
         }
       });
     } else {
@@ -258,10 +289,11 @@ export const LiveSurveillancePage: React.FC = () => {
       if (videoRef.current && 'srcObject' in videoRef.current) {
         (videoRef.current as HTMLVideoElement).srcObject = null;
       }
-      if (activeCamera.autoStartInference && !isDetecting) {
-        if (videoRef.current && 'paused' in videoRef.current && (videoRef.current as HTMLVideoElement).paused) {
-           (videoRef.current as HTMLVideoElement).play().catch(()=>{});
-        }
+      // For simulated/uploaded feeds, start inference and playback
+      if (videoRef.current && 'paused' in videoRef.current && (videoRef.current as HTMLVideoElement).paused) {
+        (videoRef.current as HTMLVideoElement).play().catch(() => {});
+      }
+      if (!inferenceIntervalRef.current) {
         setIsDetecting(true);
         inferenceIntervalRef.current = setInterval(() => {
           if (runFrameInferenceRef.current) runFrameInferenceRef.current();
@@ -276,7 +308,7 @@ export const LiveSurveillancePage: React.FC = () => {
         inferenceIntervalRef.current = null;
       }
     };
-  }, [feedSource, activeCameraId, startWebcam, stopWebcam]);
+  }, [feedSource, activeCameraId, liveTestStarted, startWebcam, stopWebcam]);
 
   // ── Capture composite screenshot & Upload evidence ─────────────────────────
   const captureAndUploadEvidence = useCallback((count: number, dets: any[], incidentId?: string) => {
@@ -625,68 +657,47 @@ export const LiveSurveillancePage: React.FC = () => {
     runFrameInferenceRef.current = runFrameInference;
   }, [runFrameInference]);
 
-  // ── Toggle AI Inference loop ──────────────────────────────────────────────
-  const toggleInference = async () => {
-    if (isDetecting) {
-      // User is stopping inference — clear intent flag in the backend database
-      try {
-        await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, false);
-        updateCamera(activeCamera.id, { autoStartInference: false });
-      } catch (err) {
-        console.warn("Failed to persist auto-start preference in DB:", err);
-      }
+  // ── START / STOP LIVE TEST handlers ────────────────────────────────────────
+  const handleStartLiveTest = async () => {
+    setCameraError(null);
+    setLiveTestStarted(true);
+    // The useEffect on [liveTestStarted] will handle webcam + inference startup
+    try {
+      await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, true);
+      updateCamera(activeCamera.id, { autoStartInference: true });
+    } catch (err) {
+      console.warn("Failed to persist auto-start preference in DB:", err);
+    }
+  };
 
-      if (inferenceIntervalRef.current) {
-        clearInterval(inferenceIntervalRef.current);
-        inferenceIntervalRef.current = null;
-      }
-      setIsDetecting(false);
-      setWebcamFPS(0);
-      setInferenceLatency(0);
-      inferenceTimestampsRef.current = [];
-      // Clear detections overlay
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        ctx?.clearRect(0, 0, canvas.width, canvas.height);
-      }
-      setRealDetections([]);
-      setRealTracks([]);
-      setPersonCount(0);
-      setWebcamStatus('NO HUMAN DETECTED');
-    } else {
-      // Record intent: if user explicitly starts inference, auto-resume it
-      // on next page load / refresh.
-      try {
-        await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, true);
-        updateCamera(activeCamera.id, { autoStartInference: true });
-      } catch (err) {
-        console.warn("Failed to persist auto-start preference in DB:", err);
-      }
-
-      const startLoop = () => {
-        // Guard: never run two loops simultaneously
-        if (inferenceIntervalRef.current) {
-          clearInterval(inferenceIntervalRef.current);
-        }
-        setIsDetecting(true);
-        // Interval ~180 ms ≈ 5.5 frames/s to keep CPU load controlled
-        inferenceIntervalRef.current = setInterval(() => {
-          if (runFrameInferenceRef.current) runFrameInferenceRef.current();
-        }, 180);
-      };
-
-      if (feedSource === 'WEBCAM' && !webcamActive) {
-        startWebcam().then(success => {
-          if (success) startLoop();
-        });
-      } else {
-        // Ensure the simulated/uploaded video is actually playing before starting inference
-        if (feedSource !== 'WEBCAM' && videoRef.current && 'paused' in videoRef.current && (videoRef.current as HTMLVideoElement).paused) {
-          (videoRef.current as HTMLVideoElement).play().catch(() => {});
-        }
-        startLoop();
-      }
+  const handleStopLiveTest = async () => {
+    setLiveTestStarted(false);
+    stopWebcam();
+    if (inferenceIntervalRef.current) {
+      clearInterval(inferenceIntervalRef.current);
+      inferenceIntervalRef.current = null;
+    }
+    setIsDetecting(false);
+    setWebcamFPS(0);
+    setInferenceLatency(0);
+    inferenceTimestampsRef.current = [];
+    setRealDetections([]);
+    setRealTracks([]);
+    setPersonCount(0);
+    setVehicleCount(0);
+    setVehicleDetections([]);
+    setWebcamStatus('NO HUMAN DETECTED');
+    setCameraError(null);
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    try {
+      await ibvapApi.updateCameraInferenceAutoStart(activeCamera.id, false);
+      updateCamera(activeCamera.id, { autoStartInference: false });
+    } catch (err) {
+      console.warn("Failed to persist auto-start preference in DB:", err);
     }
   };
 
@@ -787,13 +798,15 @@ export const LiveSurveillancePage: React.FC = () => {
             <input type="file" accept="video/mp4" onChange={handleFileUpload} className="hidden" />
           </label>
           <button
-            onClick={toggleInference}
-            className={`px-4 py-2 text-white text-sm font-semibold rounded shadow-sm flex items-center gap-2 transition-colors ${
-              isDetecting ? 'bg-[#D92D20] hover:bg-[#b02017]' : 'bg-[#1F5F8B] hover:bg-[#0F2742]'
+            onClick={liveTestStarted ? handleStopLiveTest : handleStartLiveTest}
+            className={`px-5 py-2.5 text-white text-sm font-bold rounded-lg shadow-md flex items-center gap-2.5 transition-all duration-200 ${
+              liveTestStarted
+                ? 'bg-[#D92D20] hover:bg-[#b02017] shadow-red-200/50'
+                : 'bg-[#1F5F8B] hover:bg-[#0F2742] shadow-sky-200/50'
             }`}
           >
-            <Radio className={`w-4 h-4 ${isDetecting ? 'animate-pulse' : ''}`} />
-            {isDetecting ? 'AI INFERENCE RUNNING (STOP)' : 'Start AI Inference'}
+            <Radio className={`w-4 h-4 ${liveTestStarted ? 'animate-pulse' : ''}`} />
+            {liveTestStarted ? 'STOP LIVE TEST' : 'START LIVE TEST'}
           </button>
         </div>
       </div>
@@ -805,14 +818,42 @@ export const LiveSurveillancePage: React.FC = () => {
           <div className="relative bg-black rounded-lg overflow-hidden shadow-sm border border-[var(--border-color)]">
             
             {cameraError ? (
-              <div className="w-full h-[550px] flex flex-col items-center justify-center text-slate-400 bg-slate-950 p-6">
-                <AlertTriangle className="w-12 h-12 text-orange-500 mb-4 animate-bounce" />
-                <span className="text-sm font-bold tracking-wider uppercase text-orange-400 text-center">{cameraError}</span>
+              <div className="w-full h-[550px] flex flex-col items-center justify-center bg-gradient-to-b from-slate-950 to-slate-900 p-6">
+                <div className="w-16 h-16 rounded-full bg-orange-500/10 flex items-center justify-center mb-5 border border-orange-500/20">
+                  <AlertTriangle className="w-8 h-8 text-orange-400" />
+                </div>
+                <span className="text-sm font-bold tracking-wider uppercase text-orange-400 text-center max-w-md">{cameraError}</span>
+                <p className="text-xs text-slate-500 mt-2 text-center max-w-sm">Please check your camera connection and browser permissions, then try again.</p>
                 <button
-                  onClick={startWebcam}
-                  className="mt-4 px-3 py-1.5 bg-[#1F5F8B] text-white rounded text-xs font-bold hover:bg-[#0F2742]"
+                  onClick={handleStartLiveTest}
+                  className="mt-5 px-5 py-2 bg-[#1F5F8B] text-white rounded-lg text-xs font-bold hover:bg-[#0F2742] transition-colors shadow-md"
                 >
                   RETRY
+                </button>
+              </div>
+            ) : !liveTestStarted ? (
+              /* ── STANDBY STATE: Camera OFF until user clicks START ── */
+              <div className="w-full h-[550px] flex flex-col items-center justify-center bg-gradient-to-b from-slate-950 to-slate-900 p-6">
+                <div className="w-20 h-20 rounded-full bg-slate-800/80 flex items-center justify-center mb-6 border border-slate-700/50 shadow-lg">
+                  <CameraIcon className="w-9 h-9 text-slate-500" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-300 tracking-wide mb-1">CAMERA STANDBY</h3>
+                <p className="text-xs text-slate-500 mb-1 font-mono">
+                  {(activeCamera as any).camera_id || activeCamera.id} • {activeCamera.sector}
+                </p>
+                <div className="flex items-center gap-2 mb-6">
+                  <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+                  <span className="text-xs text-slate-500 font-semibold tracking-wider">CAMERA OFF</span>
+                </div>
+                <p className="text-xs text-slate-600 mb-5 text-center max-w-xs">
+                  The camera is currently disabled. Click below to start the live surveillance feed and AI inference.
+                </p>
+                <button
+                  onClick={handleStartLiveTest}
+                  className="px-6 py-2.5 bg-[#1F5F8B] hover:bg-[#0F2742] text-white text-sm font-bold rounded-lg shadow-lg shadow-sky-900/30 transition-all duration-200 flex items-center gap-2.5 hover:scale-[1.02]"
+                >
+                  <Play className="w-4 h-4" />
+                  START LIVE TEST
                 </button>
               </div>
             ) : (() => {

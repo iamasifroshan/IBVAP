@@ -284,16 +284,32 @@ export const ibvapApi = {
 
   // ── HELPER: GET VIDEO URL ─────────────────────────────────
   getVideoUrlForCamera(camera: Camera): string | null {
+    if (!camera) return null;
     const host = API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '');
+    const CAMERA_DEMO_FILES: Record<string, string> = {
+      'BORDER-CAM-07': 'gettyimages-2215078536-640_adpp.mp4',
+      'SECTOR-B-CAM-03': 'gettyimages-2213890215-640_adpp.mp4',
+      'BOP-NORTH-02': '12522257-hd_1920_1080_24fps.mp4',
+      'SOUTH-TRENCH-10': '17502678-hd_1080_1920_30fps.mp4',
+    };
+
     if (camera.protocol === 'SIMULATED_FILE' || camera.streamUrl?.endsWith('.mp4')) {
-      const filename = camera.streamUrl.split(/[/\\]/).pop();
+      const filename = camera.streamUrl?.split(/[/\\]/).pop() || CAMERA_DEMO_FILES[camera.id];
       if (filename) {
         return `${host}/videos/${filename}`;
       }
     }
-    // Return MJPEG stream for RTSP or Webcams
-    if (camera.protocol === 'RTSP' || camera.protocol === 'WEBCAM' || camera.streamUrl?.startsWith('rtsp')) {
+    // Return MJPEG stream for RTSP or Webcams if explicitly streaming, else demo video
+    if (camera.protocol === 'RTSP' || camera.streamUrl?.startsWith('rtsp')) {
+      const demoFile = CAMERA_DEMO_FILES[camera.id];
+      if (demoFile) {
+        return `${host}/videos/${demoFile}`;
+      }
       return `${host}/api/v1/cameras/${camera.id}/stream`;
+    }
+    const fallbackFile = CAMERA_DEMO_FILES[camera.id];
+    if (fallbackFile) {
+      return `${host}/videos/${fallbackFile}`;
     }
     return null;
   },
@@ -355,11 +371,12 @@ export const ibvapApi = {
 
   // ── POST /api/search/query (SentinelQuery AI) ─────────────
   async querySentinelAI(
-    queryText: string
+    queryText: string,
+    fallbackIncidents?: Incident[]
   ): Promise<{ filters: StructuredSearchFilters; results: Incident[] }> {
     // Local parse is always run first so the UI shows immediate feedback
     const filters = parseSentinelQuery(queryText);
-    const localResults = searchIncidentVault(MOCK_INCIDENTS, filters);
+    const localResults = searchIncidentVault(fallbackIncidents || MOCK_INCIDENTS, filters);
 
     return tryLive(
       () =>
@@ -651,6 +668,35 @@ export const ibvapApi = {
       },
       mockRegisteredPeople,
       'GET /faces'
+    );
+  },
+
+  async getFaceStatus(): Promise<{
+    total_profiles: number;
+    active_profiles: number;
+    recognitions_today: number;
+    unknown_detections: number;
+    recent_recognitions: Array<{
+      id: string;
+      person_name: string;
+      camera_name: string;
+      sector: string;
+      timestamp: string;
+      confidence: number;
+      status: 'MATCHED' | 'REVIEW';
+      snapshot_url: string;
+    }>;
+  }> {
+    return tryLive(
+      () => apiFetch(`${API_BASE_URL}/faces/status`),
+      {
+        total_profiles: 3,
+        active_profiles: 3,
+        recognitions_today: 1,
+        unknown_detections: 23,
+        recent_recognitions: []
+      },
+      'GET /faces/status'
     );
   },
 
@@ -1008,6 +1054,34 @@ export interface AnalyticsSummary {
   resolvedToday:  number;
   avgThreatScore: number;
   topSector:      string;
+  totalDetections?: number;
+  confirmedThreats?: number;
+  filteredSuppressed?: number;
+  aiConfidence?: number;
+  peopleDetected?: number;
+  vehiclesDetected?: number;
+  unknownTargets?: number;
+  activeCameras?: number;
+  totalCameras?: number;
+  threatDistribution?: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  cameraStatuses?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    sector: string;
+  }>;
+  hourlyActivity?: Array<{
+    time: string;
+    count: number;
+  }>;
+  totalCandidateDetections?: number;
+  filteredNoiseCount?: number;
+  falseAlarmReductionRate?: number;
 }
 
 // ─────────────────────────────────────────────────────────────

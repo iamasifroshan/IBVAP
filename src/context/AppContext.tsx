@@ -37,6 +37,9 @@ interface AppContextType {
   currentTimeStr: string;
   knownPersonsCount: number;
   setKnownPersonsCount: React.Dispatch<React.SetStateAction<number>>;
+  sidebarOpen: boolean;
+  setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  toggleSidebar: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -51,8 +54,38 @@ const LOCAL_STORAGE_KEYS = {
   CAMERAS: 'ibvap_cameras',
 };
 
+// Map PageId → URL path and back for browser history support
+const PAGE_TO_PATH: Record<PageId, string> = {
+  'command-overview': '/',
+  'live-surveillance': '/live-surveillance',
+  'incidents': '/incidents',
+  'face-recognition': '/known-persons',
+  'analytics': '/analytics',
+  'settings': '/settings',
+  'camera-management': '/camera-management',
+  'virtual-fence': '/virtual-fence',
+  'sentinel-query': '/investigation',
+  'edge-guard': '/edge-operations',
+  'enviro-vision': '/environment-analysis',
+  'ai-training-center': '/ai-training',
+  'system-verification': '/system-verification',
+};
+
+const PATH_TO_PAGE: Record<string, PageId> = Object.fromEntries(
+  Object.entries(PAGE_TO_PATH).map(([k, v]) => [v, k as PageId])
+);
+
+const getPageFromPath = (path: string): PageId => {
+  return PATH_TO_PAGE[path] || 'command-overview';
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activePage, setActivePageState] = useState<PageId>(() => {
+    // Restore from URL path first, then localStorage, then default
+    const pathPage = getPageFromPath(window.location.pathname);
+    if (pathPage !== 'command-overview' || window.location.pathname === '/') {
+      return pathPage;
+    }
     const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE);
     return (saved as PageId) || 'command-overview';
   });
@@ -60,6 +93,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setActivePage = (page: PageId) => {
     setActivePageState(page);
     localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE, page);
+    const path = PAGE_TO_PATH[page] || '/';
+    // Only push if this is a different page (avoid duplicate history entries)
+    if (window.location.pathname !== path) {
+      window.history.pushState({ page }, '', path);
+    }
   };
 
   // Load persistent state from localStorage if available
@@ -116,6 +154,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [knownPersonsCount, setKnownPersonsCount] = useState<number>(0);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
+  const toggleSidebar = () => setSidebarOpen(prev => !prev);
+
+  // ── Browser Back/Forward History Support ──────────────────────────────────
+  useEffect(() => {
+    // Sync current page to URL on mount (replace so we don't add a history entry)
+    const currentPath = PAGE_TO_PATH[activePage] || '/';
+    if (window.location.pathname !== currentPath) {
+      window.history.replaceState({ page: activePage }, '', currentPath);
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+      const page: PageId = (event.state?.page as PageId) || getPageFromPath(window.location.pathname);
+      setActivePageState(page);
+      localStorage.setItem(LOCAL_STORAGE_KEYS.ACTIVE_PAGE, page);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Save changes to localStorage for persistent state across refreshes & navigation
   useEffect(() => {
@@ -497,7 +556,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addIncident,
       currentTimeStr,
       knownPersonsCount,
-      setKnownPersonsCount
+      setKnownPersonsCount,
+      sidebarOpen,
+      setSidebarOpen,
+      toggleSidebar
     }}>
       {children}
     </AppContext.Provider>

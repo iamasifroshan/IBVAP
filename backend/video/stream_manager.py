@@ -15,6 +15,7 @@ Provides:
   - Reconnection guidance and structured error messages
 """
 
+import sys
 import cv2
 import os
 import re
@@ -351,7 +352,7 @@ class StreamSourceManager:
 
         if detected_type == SOURCE_WEBCAM:
             idx = StreamSourceManager.parse_webcam_index(source_url)
-            cap = cv2.VideoCapture(idx)
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW) if sys.platform.startswith("win") else cv2.VideoCapture(idx)
             video_id = f"webcam:{idx}"
         elif detected_type in (SOURCE_RTSP, "IP_CCTV"):
             resolved = StreamSourceManager.resolve_rtsp_url(source_url)

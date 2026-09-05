@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import sys
 import uuid
 import cv2
 import time
@@ -246,7 +247,8 @@ def generate_mjpeg_stream(camera: CameraModel):
         idx = stream_manager.parse_webcam_index(camera.source_url)
         url = idx
 
-    cap = cv2.VideoCapture(url)
+    is_webcam_win = camera.source_type == "WEBCAM" and sys.platform.startswith("win")
+    cap = cv2.VideoCapture(url, cv2.CAP_DSHOW) if is_webcam_win else cv2.VideoCapture(url)
     if camera.source_type == "RTSP":
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
         
@@ -256,7 +258,7 @@ def generate_mjpeg_stream(camera: CameraModel):
             if not ret:
                 time.sleep(1)
                 cap.release()
-                cap = cv2.VideoCapture(url)
+                cap = cv2.VideoCapture(url, cv2.CAP_DSHOW) if is_webcam_win else cv2.VideoCapture(url)
                 if camera.source_type == "RTSP":
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
                 continue

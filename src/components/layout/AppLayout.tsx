@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
-import { LiveDemoController } from '../common/LiveDemoController';
+import { Footer } from './Footer';
 import { CommandOverviewPage } from '../pages/CommandOverviewPage';
 import { LiveSurveillancePage } from '../pages/LiveSurveillancePage';
 import { IncidentsPage } from '../pages/IncidentsPage';
@@ -25,7 +25,8 @@ export const AppLayout: React.FC = () => {
     selectedIncident, 
     setSelectedIncident, 
     explainableIncident, 
-    setExplainableIncident 
+    setExplainableIncident,
+    sidebarOpen
   } = useApp();
 
   const renderActivePage = () => {
@@ -62,26 +63,25 @@ export const AppLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)] flex flex-col font-sans">
+    <div className="h-screen bg-[#F4F7FB] text-[#1E293B] flex flex-col font-sans overflow-hidden">
       
-      {/* Top Operational Status Bar */}
+      {/* ── Top Government Command Header ── */}
       <TopBar />
 
-      {/* Real Live Demo Controller Bar */}
-      <LiveDemoController />
-
-      {/* Main Body Shell */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* ── Main Layout: Sidebar + Full-Width Content Canvas ── */}
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
         
-        {/* Sidebar Navigation */}
+        {/* Collapsible Left Sidebar Rail / Drawer */}
         <Sidebar />
 
         {/* Dynamic Page Content View */}
-        <main className="flex-1 overflow-y-auto">
-          {/* Max-width container for content area with 32px padding on desktop */}
-          <div className="max-w-[1600px] mx-auto w-full p-4 md:p-8">
+        <main className={`flex-1 min-h-0 flex flex-col ${activePage === 'incidents' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <div className={`w-full px-4 sm:px-6 max-w-[1920px] mx-auto flex-1 ${activePage === 'incidents' ? 'flex flex-col h-full overflow-hidden py-3 min-h-0' : 'py-4 md:py-5 shrink-0'}`}>
             {renderActivePage()}
           </div>
+
+          {/* ── Official Footer ── */}
+          {activePage !== 'incidents' && <Footer />}
         </main>
       </div>
 
