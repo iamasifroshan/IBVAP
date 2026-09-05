@@ -59,3 +59,7 @@ pytest_out.txt
 scratch_fakes.txt
 backend/ibvap_test_runtime.db
 backend/ibvap.db.backup
+
+backend/storage/faces/*
+
+backend/ibvap.db
