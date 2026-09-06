@@ -27,6 +27,7 @@ import { useApp } from '../../context/AppContext';
 import { evaluateSmartAlert } from '../../services/smartAlertEngine';
 import { API_BASE_URL } from '../../services/apiConfig';
 import { formatVideoTimestamp } from '../../utils/timestampUtils';
+import { resolveImageUrl } from '../../utils/imageUtils';
 
 interface EvidenceModalProps {
   incident: Incident | null;
@@ -214,16 +215,20 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
                 </div>
 
                 {/* Image Container */}
-                <div className="relative bg-[#0A0F1A]">
-                  <img
-                    src={incident.snapshotUrl
-                      ? (incident.snapshotUrl.startsWith('/') ? `${API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '')}${incident.snapshotUrl}` : incident.snapshotUrl)
-                      : 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?q=80&w=800&auto=format&fit=crop'
-                    }
-                    alt="Incident Evidence Snapshot"
-                    className="w-full object-contain"
-                    style={{ maxHeight: '420px', minHeight: '280px' }}
-                  />
+                <div className="relative bg-[#0A0F1A] min-h-[280px] flex items-center justify-center">
+                  {resolveImageUrl(incident.snapshotUrl) ? (
+                    <img
+                      src={resolveImageUrl(incident.snapshotUrl)}
+                      alt="Incident Evidence Snapshot"
+                      className="w-full object-contain"
+                      style={{ maxHeight: '420px', minHeight: '280px' }}
+                    />
+                  ) : (
+                    <div className="text-slate-400 text-xs flex flex-col items-center justify-center p-8 gap-2">
+                      <Camera className="w-8 h-8 text-slate-500" />
+                      <span>Evidence image unavailable</span>
+                    </div>
+                  )}
 
                   {/* AI Bounding Box Overlay */}
                   <div className="absolute top-[20%] left-[26%] w-[130px] h-[175px] border-2 border-red-500 bg-red-500/5 rounded-sm pointer-events-none flex flex-col justify-between p-1">

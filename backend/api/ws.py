@@ -18,16 +18,27 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
+        dead_connections = []
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
             except Exception:
-                pass
+                dead_connections.append(connection)
+        for dc in dead_connections:
+            if dc in self.active_connections:
+                self.active_connections.remove(dc)
 
 manager = ConnectionManager()
 
+main_loop = None
+
 @router.websocket("/ws/detections")
 async def websocket_endpoint(websocket: WebSocket):
+    global main_loop
+    try:
+        main_loop = asyncio.get_running_loop()
+    except Exception:
+        pass
     await manager.connect(websocket)
     try:
         while True:
@@ -40,9 +51,18 @@ def broadcast_event_sync(event_type: str, payload: dict):
     """
     Sync helper to broadcast events from regular sync routes or background threads.
     """
+    message = json.dumps({"type": event_type, "payload": payload}, default=str)
     try:
         loop = asyncio.get_running_loop()
-        message = json.dumps({"type": event_type, "payload": payload}, default=str)
         loop.create_task(manager.broadcast(message))
+        return
     except RuntimeError:
-        pass # No event loop running
+        pass
+
+    global main_loop
+    if main_loop and main_loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(manager.broadcast(message), main_loop)
+        except Exception:
+            pass
+

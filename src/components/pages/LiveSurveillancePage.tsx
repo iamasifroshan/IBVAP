@@ -6,6 +6,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ibvapApi } from '../../services/apiClient';
 import { getCameraById } from '../../types';
+import type { C2Status } from '../../types';
 
 interface ZonePolygon {
   name: string;
@@ -21,7 +22,9 @@ export const LiveSurveillancePage: React.FC = () => {
     addIncident,
     metrics,
     updateCamera,
-    networkStatus
+    networkStatus,
+    securityEvents,
+    setActivePage,
   } = useApp();
 
   // Mode & Playback states
@@ -52,6 +55,15 @@ export const LiveSurveillancePage: React.FC = () => {
   // Vehicle detection state
   const [vehicleCount, setVehicleCount] = useState<number>(0);
   const [vehicleDetections, setVehicleDetections] = useState<any[]>([]);
+  // Suspicious activity state
+  const [suspiciousActivities, setSuspiciousActivities] = useState<any[]>([]);
+  // Night movement state
+  const [nightMovements, setNightMovements] = useState<any[]>([]);
+  // Unified Security Events state (Phase 4)
+  const [liveSecurityEvents, setLiveSecurityEvents] = useState<any[]>([]);
+  // C2 Integration status (Phase 6)
+  const [c2Status, setC2Status] = useState<C2Status | null>(null);
+
 
   // Canvas / Video Refs
   const videoRef = useRef<HTMLVideoElement | HTMLImageElement | null>(null);
@@ -96,6 +108,25 @@ export const LiveSurveillancePage: React.FC = () => {
           vid.srcObject = null;
         }
       }
+    };
+  }, []);
+
+  // Poll C2 Integration status every 5 seconds
+  useEffect(() => {
+    let active = true;
+    const loadC2 = async () => {
+      try {
+        const st = await ibvapApi.getC2Status();
+        if (active && st) setC2Status(st);
+      } catch {
+        // preserve
+      }
+    };
+    loadC2();
+    const timer = setInterval(loadC2, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
     };
   }, []);
 
@@ -359,8 +390,9 @@ export const LiveSurveillancePage: React.FC = () => {
   }, [activeCamera]);
 
   // ── Draw bounding boxes on Canvas ──────────────────────────────────────────
-  const drawDetections = useCallback((dets: any[], vdets: any[] = []) => {
+  const drawDetections = useCallback((dets: any[], vdets: any[] = [], susp: any[] = [], nightMoves: any[] = []) => {
     const canvas = canvasRef.current;
+
     const video = videoRef.current;
     if (!canvas || !video) return;
 
@@ -470,8 +502,56 @@ export const LiveSurveillancePage: React.FC = () => {
       ctx.fillStyle = '#94A3B8'; // Slate 400
       ctx.fillText(line3, bx + 6, Math.max(34, by - 4));
       
+      // Behavioral Badge for Suspicious Activity (e.g., LOITERING · TRK#41 · 34s · MEDIUM)
+      const matchingSusp = susp.find((s: any) => s.track_id === det.track_id);
+      if (matchingSusp) {
+        const actLabel = (matchingSusp.activity_type || '').replace(/_/g, ' ');
+        const dur = `${matchingSusp.duration_sec ?? 0}s`;
+        const sev = matchingSusp.severity || 'MEDIUM';
+        const suspBadgeText = `${actLabel} · ${matchingSusp.track_label || `TRK#${det.track_id}`} · ${dur} · ${sev}`;
+
+        const badgeColor = sev === 'HIGH' ? '#EF4444' : '#F59E0B';
+        ctx.font = 'bold 10px monospace';
+        const badgeW = ctx.measureText(suspBadgeText).width + 16;
+        const badgeH = 18;
+        const badgeY = Math.max(0, by - labelHeight - badgeH - 3);
+
+        ctx.fillStyle = 'rgba(11, 31, 51, 0.95)';
+        ctx.fillRect(bx, badgeY, badgeW, badgeH);
+        ctx.strokeStyle = badgeColor;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bx, badgeY, badgeW, badgeH);
+        ctx.fillStyle = badgeColor;
+        ctx.fillRect(bx, badgeY, 3, badgeH);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(suspBadgeText, bx + 8, badgeY + 13);
+      }
+
+      // Night-Time Movement Badge (e.g., NIGHT MOVEMENT · TRK#41 · L:42.1 · D:0.045)
+      const matchingNM = nightMoves.find((n: any) => n.track_id === det.track_id);
+      if (matchingNM) {
+        const nmBadgeText = `NIGHT MOVEMENT · ${matchingNM.track_label || `TRK#${det.track_id}`} · Luma ${matchingNM.avg_luma} · Disp ${matchingNM.displacement}`;
+        const nmBadgeColor = '#38BDF8'; // Sky blue / cyan within IBVAP palette
+        ctx.font = 'bold 10px monospace';
+        const badgeW = ctx.measureText(nmBadgeText).width + 16;
+        const badgeH = 18;
+        const badgeOffset = matchingSusp ? (labelHeight + 36 + 6) : (labelHeight + 18 + 3);
+        const badgeY = Math.max(0, by - badgeOffset);
+
+        ctx.fillStyle = 'rgba(11, 31, 51, 0.95)';
+        ctx.fillRect(bx, badgeY, badgeW, badgeH);
+        ctx.strokeStyle = nmBadgeColor;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bx, badgeY, badgeW, badgeH);
+        ctx.fillStyle = nmBadgeColor;
+        ctx.fillRect(bx, badgeY, 3, badgeH);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(nmBadgeText, bx + 8, badgeY + 13);
+      }
+
       ctx.restore();
     });
+
 
     // 3. Draw vehicle bounding boxes — amber (#F59E0B), distinct from person overlays
     vdets.forEach((det: any) => {
@@ -608,6 +688,17 @@ export const LiveSurveillancePage: React.FC = () => {
         setVehicleCount(vdets.length);
         setVehicleDetections(vdets);
 
+        const suspActs = res.suspicious_activities || [];
+        setSuspiciousActivities(suspActs);
+
+        const nightMoves = res.night_movements || [];
+        setNightMovements(nightMoves);
+
+        const secEvents = res.security_events || [];
+        if (secEvents.length > 0) {
+          setLiveSecurityEvents(secEvents);
+        }
+
         setRealTracks(dets.map((d: any) => ({
           track_id: d.track_id != null ? d.track_id : Math.floor(Math.random() * 1000),
           confidence_max: d.confidence,
@@ -618,7 +709,7 @@ export const LiveSurveillancePage: React.FC = () => {
         setLastDetectionTime(new Date().toLocaleTimeString());
 
         if (isDebugLog) {
-          console.log(`[INFERENCE #${seq}] 3. response: ${latency}ms | persons=${count} vehicles=${vdets.length} FPS=${rollingFps}`);
+          console.log(`[INFERENCE #${seq}] 3. response: ${latency}ms | persons=${count} vehicles=${vdets.length} susp=${suspActs.length} nm=${nightMoves.length} FPS=${rollingFps}`);
         }
 
         const hasCreatedIncidents = (res.incidents_created_count || 0) > 0;
@@ -630,7 +721,7 @@ export const LiveSurveillancePage: React.FC = () => {
           if (!isAlertingRef.current || (alertNow - lastAlertTimeRef.current > 30000)) {
             isAlertingRef.current = true;
             lastAlertTimeRef.current = alertNow;
-            drawDetections(dets, vdets);
+            drawDetections(dets, vdets, suspActs, nightMoves);
             const incId = (res.incident_ids && res.incident_ids.length > 0) ? res.incident_ids[0] : undefined;
             setTimeout(() => captureAndUploadEvidence(count, dets, incId), 100);
           }
@@ -642,7 +733,8 @@ export const LiveSurveillancePage: React.FC = () => {
           isAlertingRef.current = false;
         }
 
-        drawDetections(dets, vdets);
+        drawDetections(dets, vdets, suspActs, nightMoves);
+
       } catch (err) {
         console.warn(`[INFERENCE #${seq}] Frame inference failed:`, err);
       } finally {
@@ -686,7 +778,11 @@ export const LiveSurveillancePage: React.FC = () => {
     setPersonCount(0);
     setVehicleCount(0);
     setVehicleDetections([]);
+    setSuspiciousActivities([]);
+    setNightMovements([]);
+    setLiveSecurityEvents([]);
     setWebcamStatus('NO HUMAN DETECTED');
+
     setCameraError(null);
     const canvas = canvasRef.current;
     if (canvas) {
@@ -871,6 +967,7 @@ export const LiveSurveillancePage: React.FC = () => {
                     />
                   ) : (
                     <video
+                      key={feedSource === 'UPLOADED' ? 'uploaded' : `${activeCameraId}_${simUrl || ''}`}
                       ref={(el) => { (videoRef as any).current = el; }}
                       src={feedSource === 'UPLOADED' && uploadedVideoUrl ? uploadedVideoUrl : (simUrl ?? undefined)}
                       crossOrigin="anonymous"
@@ -998,12 +1095,148 @@ export const LiveSurveillancePage: React.FC = () => {
                       <span className="font-bold text-[#1F5F8B]">{personCount}</span>
                     </div>
                     <div className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-100 rounded text-xs font-mono">
+                      <span className="text-slate-500 font-semibold">VEHICLE COUNT</span>
+                      <span className="font-bold text-amber-600">{vehicleCount}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-100 rounded text-xs font-mono">
                       <span className="text-slate-500 font-semibold">AI INFERENCE</span>
                       <span className={`font-bold ${isDetecting ? 'text-emerald-500' : 'text-slate-400'}`}>
                         {isDetecting ? 'ACTIVE' : 'IDLE'}
                       </span>
                     </div>
                   </div>
+                </div>
+
+                {/* UNIFIED SUBJECT INTELLIGENCE (Phase 4) */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      Unified Subject Intelligence
+                    </h3>
+                    <span className="text-[11px] font-mono font-bold text-[#1F5F8B] bg-sky-50 px-2 py-0.5 rounded border border-sky-100">
+                      {((liveSecurityEvents.length > 0
+                        ? liveSecurityEvents
+                        : securityEvents.filter(e => (e.camera_id === ((activeCamera as any).camera_id || activeCamera.id) || e.camera_id === activeCameraId) && e.status === 'active')
+                      )).length} ACTIVE
+                    </span>
+                  </div>
+
+                  {(() => {
+                    const activeSubjectEvents = liveSecurityEvents.length > 0
+                      ? liveSecurityEvents
+                      : securityEvents.filter(e => (e.camera_id === ((activeCamera as any).camera_id || activeCamera.id) || e.camera_id === activeCameraId) && e.status === 'active');
+
+                    if (activeSubjectEvents.length === 0) {
+                      return (
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-500 font-mono text-center">
+                          No correlated subjects currently active on this camera.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-3">
+                        {activeSubjectEvents.map((ev: any) => {
+                          const isHighOrCritical = ev.threat_level === 'high' || ev.threat_level === 'critical';
+                          const isMedium = ev.threat_level === 'medium';
+                          return (
+                            <div
+                              key={ev.event_id || ev.id}
+                              className={`p-3.5 rounded-lg border transition-all ${
+                                isHighOrCritical
+                                  ? 'bg-red-50/70 border-red-200 shadow-sm'
+                                  : isMedium
+                                  ? 'bg-amber-50/70 border-amber-200 shadow-sm'
+                                  : 'bg-slate-50 border-slate-200 shadow-sm'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono font-bold text-sm text-slate-900">
+                                    {ev.track_label || `TRK#${ev.track_id}`}
+                                  </span>
+                                  <span className="text-slate-400">—</span>
+                                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                    ev.face_info?.person_name
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : ev.threat_reason?.includes('Unknown')
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-slate-200 text-slate-700'
+                                  }`}>
+                                    {ev.face_info?.person_name
+                                      ? `KNOWN (${ev.face_info.person_name})`
+                                      : ev.threat_reason?.includes('Unknown')
+                                      ? 'UNKNOWN'
+                                      : (ev.face_info?.identity_status || 'FACE_UNAVAILABLE')}
+                                  </span>
+                                </div>
+                                <span className={`text-xs font-bold px-2.5 py-0.5 rounded uppercase font-mono ${
+                                  ev.threat_level === 'critical'
+                                    ? 'bg-[#D92D20] text-white animate-pulse'
+                                    : ev.threat_level === 'high'
+                                    ? 'bg-[#D92D20] text-white'
+                                    : ev.threat_level === 'medium'
+                                    ? 'bg-[#F59E0B] text-white'
+                                    : 'bg-[#10B981] text-white'
+                                }`}>
+                                  THREAT: {ev.threat_level?.toUpperCase()}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 text-xs font-mono text-slate-600">
+                                <span className="font-semibold text-slate-500">Camera: </span>
+                                {ev.camera_name || ev.camera_id}
+                              </div>
+
+                              {ev.contributing_signals && ev.contributing_signals.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                                    Signals:
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {ev.contributing_signals.map((sig: string, sIdx: number) => (
+                                      <span
+                                        key={sIdx}
+                                        className="text-[11px] font-mono px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700"
+                                      >
+                                        • {sig.replace(/_/g, ' ')}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] font-mono text-slate-500">
+                                <div>First: {ev.first_seen ? new Date(ev.first_seen).toLocaleTimeString() : 'N/A'}</div>
+                                <div>Last: {ev.last_seen ? new Date(ev.last_seen).toLocaleTimeString() : 'N/A'}</div>
+                              </div>
+
+                              <div className="mt-2.5 flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                                  <span className="text-slate-400 font-medium">C2:</span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                    c2Status?.enabled && c2Status.connected
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : c2Status?.enabled
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                  }`}>
+                                    {c2Status?.enabled ? (c2Status.connected ? 'ACKNOWLEDGED' : 'PENDING') : 'NOT DISPATCHED'}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => setActivePage('sentinel-query')}
+                                  className="px-3 py-1 bg-[#1F5F8B] hover:bg-[#0F2742] text-white text-xs font-bold rounded shadow-sm transition-colors cursor-pointer"
+                                >
+                                  Investigate
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {webcamStatus === 'ALERT' && (
@@ -1022,8 +1255,67 @@ export const LiveSurveillancePage: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {suspiciousActivities.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">Suspicious Behaviors</h3>
+                    <div className="space-y-2">
+                      {suspiciousActivities.map((s, idx) => (
+                        <div key={idx} className="p-3 bg-amber-50 border border-amber-200 rounded flex items-start justify-between">
+                          <div className="flex items-start gap-2.5">
+                            <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${s.severity === 'HIGH' ? 'text-red-600' : 'text-amber-600'}`} />
+                            <div>
+                              <div className="text-xs font-bold text-slate-800">
+                                {s.activity_type.replace(/_/g, ' ')} · {s.track_label}
+                              </div>
+                              <div className="text-[11px] text-slate-600 mt-0.5">{s.description}</div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end shrink-0 ml-2">
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              s.severity === 'HIGH' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {s.severity}
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-600 mt-1">{s.duration_sec}s</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {nightMovements.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-3">Night-Time Movements</h3>
+                    <div className="space-y-2">
+                      {nightMovements.map((n, idx) => (
+                        <div key={idx} className="p-3 bg-sky-50 border border-sky-200 rounded flex items-start justify-between">
+                          <div className="flex items-start gap-2.5">
+                            <Activity className="w-4 h-4 shrink-0 mt-0.5 text-sky-600" />
+                            <div>
+                              <div className="text-xs font-bold text-slate-800">
+                                NIGHT MOVEMENT · {n.track_label}
+                              </div>
+                              <div className="text-[11px] text-slate-600 mt-0.5">
+                                Luma: {n.avg_luma} · Dark: {(n.dark_pixel_ratio * 100).toFixed(1)}% · Disp: {n.displacement}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end shrink-0 ml-2">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">
+                              HIGH
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-600 mt-1">Path: {n.path_length}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
 
             {activeTab === 'detections' && (
               <div className="space-y-2">
@@ -1056,28 +1348,50 @@ export const LiveSurveillancePage: React.FC = () => {
 
             {activeTab === 'tracking' && (
               <div className="space-y-2">
-                {realTracks.length === 0 ? (
+                {realTracks.length === 0 && vehicleDetections.length === 0 ? (
                   <div className="text-center text-sm text-[var(--text-muted)] py-8 font-mono">No active tracks.</div>
                 ) : (
-                  realTracks.map((t, idx) => (
-                    <div key={idx} className="p-2.5 border border-slate-200 rounded bg-slate-50 space-y-1 font-mono text-xs">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-1">
-                        <span className="font-bold text-[#1F5F8B]">TRACK-00{t.track_id}</span>
-                        <span className="font-bold text-emerald-500">{(t.confidence_max * 100).toFixed(0)}%</span>
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-500">
-                        <span>CLASS: {t.fine_class}</span>
-                        <span>STATUS: ACTIVE</span>
-                      </div>
-                      {t.face && (
-                        <div className={`text-[10px] pt-1 border-t border-slate-100 font-semibold ${t.face.recognized ? 'text-blue-600' : 'text-slate-400'}`}>
-                          {t.face.recognized
-                            ? `👤 KNOWN · ${t.face.confidence_level || t.face.confidenceLevel || 'HIGH'}: ${t.face.name} (${Math.round(t.face.confidence * 100)}%)`
-                            : '👤 UNKNOWN --'}
+                  <>
+                    {realTracks.map((t, idx) => (
+                      <div key={idx} className="p-2.5 border border-slate-200 rounded bg-slate-50 space-y-1 font-mono text-xs">
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-1">
+                          <span className="font-bold text-[#1F5F8B]">TRACK-00{t.track_id}</span>
+                          <span className="font-bold text-emerald-500">{(t.confidence_max * 100).toFixed(0)}%</span>
                         </div>
-                      )}
-                    </div>
-                  ))
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <span>CLASS: {t.fine_class}</span>
+                          <span>STATUS: ACTIVE</span>
+                        </div>
+                        {t.face && (
+                          <div className={`text-[10px] pt-1 border-t border-slate-100 font-semibold ${t.face.recognized ? 'text-blue-600' : 'text-slate-400'}`}>
+                            {t.face.recognized
+                              ? `👤 KNOWN · ${t.face.confidence_level || t.face.confidenceLevel || 'HIGH'}: ${t.face.name} (${Math.round(t.face.confidence * 100)}%)`
+                              : '👤 UNKNOWN --'}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {vehicleDetections.map((vd, idx) => (
+                      <div key={`v_${idx}`} className="p-2.5 border border-amber-200 rounded bg-amber-50/50 space-y-1 font-mono text-xs">
+                        <div className="flex justify-between items-center border-b border-amber-100 pb-1">
+                          <span className="font-bold text-amber-700">VTRK#{vd.track_id}</span>
+                          <span className="font-bold text-amber-600">{Math.round(vd.confidence * 100)}%</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <span>CLASS: {vd.vehicle_class || 'Vehicle'}</span>
+                          <span>DIR: {vd.direction}</span>
+                        </div>
+                        {vd.plate_text && (
+                          <div className="flex justify-between items-center pt-1 border-t border-amber-100 mt-1">
+                            <span className="font-bold text-slate-800 tracking-wider bg-white px-2 py-0.5 border border-slate-300 rounded shadow-xs">{vd.plate_text}</span>
+                            <span className={`text-[10px] font-bold ${vd.format_valid ? 'text-emerald-600' : 'text-slate-500'}`}>
+                              {vd.plate_stable ? 'STABLE' : 'READING...'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
             )}
@@ -1090,6 +1404,7 @@ export const LiveSurveillancePage: React.FC = () => {
                 <div className="flex justify-between"><span>Latency:</span> <span>{inferenceLatency}ms</span></div>
                 <div className="flex justify-between"><span>Inference FPS:</span> <span>{webcamFPS} FPS</span></div>
                 <div className="flex justify-between"><span>Backend Status:</span> <span>Connected (port 8000)</span></div>
+                <div className="flex justify-between"><span>C2 Integration:</span> <span>{c2Status?.enabled ? (c2Status.connected ? 'Connected (Outbound Active)' : 'Enabled (Standby)') : 'Disabled (Autonomous Edge Mode)'}</span></div>
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import uuid
 import os
 import shutil
@@ -9,11 +9,60 @@ from datetime import datetime, timezone
 
 from database.db import get_db
 from database.models import IncidentModel, EvidenceModel
-from database.schemas import IncidentResponse, IncidentCreate, IncidentStatusUpdate
+from database.schemas import IncidentResponse, IncidentCreate, IncidentStatusUpdate, ThreatFactorSchema
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
 
-def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
+BACKEND_STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "evidence"))
+PUBLIC_STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "public", "storage", "evidence"))
+
+def has_physical_evidence(i: IncidentModel, db: Session) -> Tuple[bool, Optional[str]]:
+    """
+    Checks if incident has a physically retrievable, valid image file on disk.
+    Returns (True, resolved_normalized_url) if valid, else (False, None).
+    """
+    candidates = []
+    if i.snapshot_url:
+        candidates.append(i.snapshot_url)
+
+    # Check linked evidence models
+    evs = db.query(EvidenceModel).filter(
+        (EvidenceModel.incident_id == i.incident_id) | (EvidenceModel.incident_id == i.id)
+    ).all()
+    for ev in evs:
+        if ev.file_path:
+            candidates.append(ev.file_path)
+
+    for cand in candidates:
+        if not cand or str(cand).lower() in ("none", "null", "undefined", ""):
+            continue
+        fname = os.path.basename(str(cand).replace("\\", "/"))
+        if not fname:
+            continue
+        p1 = os.path.join(BACKEND_STORAGE_DIR, fname)
+        p2 = os.path.join(PUBLIC_STORAGE_DIR, fname)
+        if (os.path.isfile(p1) and os.path.getsize(p1) > 0) or (os.path.isfile(p2) and os.path.getsize(p2) > 0):
+            return True, f"/storage/evidence/{fname}"
+
+    return False, None
+
+def normalize_snapshot_url(raw_url: Optional[str]) -> str:
+    if not raw_url:
+        return ""
+    if raw_url.startswith("http://") or raw_url.startswith("https://"):
+        return raw_url
+    # Strip any Windows drive or path prefix if raw_url was stored as a filesystem path
+    if "\\" in raw_url or (len(raw_url) > 2 and raw_url[1] == ":"):
+        fname = os.path.basename(raw_url.replace("\\", "/"))
+        return f"/storage/evidence/{fname}"
+    if not raw_url.startswith("/"):
+        if raw_url.startswith("storage/"):
+            return f"/{raw_url}"
+        return f"/storage/evidence/{raw_url}"
+    return raw_url
+
+def map_incident_to_response(i: IncidentModel, resolved_url: Optional[str] = None) -> IncidentResponse:
+    snap_url = resolved_url or normalize_snapshot_url(i.snapshot_url)
     return IncidentResponse(
         id=i.id,
         incident_id=i.incident_id,
@@ -26,23 +75,24 @@ def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
         event_type=i.event_type,
         threat_score=i.threat_score,
         threat_level=i.threat_level,
-        threat_factors=i.threat_factors or [],
+        threat_factors=[ThreatFactorSchema(**tf) if isinstance(tf, dict) else tf for tf in (i.threat_factors or [])],
         explainable_reason=i.explainable_reason,
         environment=i.environment,
         ai_reliability=i.ai_reliability,
         visibility_score=i.visibility_score,
-        status=i.status,
-        sync_status=i.sync_status,
-        snapshot_url=i.snapshot_url,
-        zone_name=i.zone_name,
-        loitering_duration_sec=i.loitering_duration_sec,
-        speed_kmh=i.speed_kmh,
-        direction=i.direction,
-        smart_alert_confirmed=i.smart_alert_confirmed,
+        status=i.status or "active",
+        sync_status=i.sync_status or "unsynced",
+        snapshot_url=snap_url,
+        zone_name=i.zone_name or "Default Zone",
+        loitering_duration_sec=i.loitering_duration_sec or 0,
+        speed_kmh=i.speed_kmh or 0.0,
+        direction=i.direction or "Inward Perimeter",
+        smart_alert_confirmed=i.smart_alert_confirmed if i.smart_alert_confirmed is not None else True,
         validation_checks=i.validation_checks or {},
-        synced_to_cloud=i.synced_to_cloud,
+        synced_to_cloud=i.synced_to_cloud or False,
         synced_timestamp=i.synced_timestamp,
         timestamp=i.timestamp,
+
         source_video_timestamp_sec=getattr(i, 'source_video_timestamp_sec', None),
         # CamelCase Aliases for Frontend
         cameraName=i.camera_name,
@@ -50,12 +100,12 @@ def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
         objectType=i.object_type,
         persistentId=i.track_id,
         threatScore=i.threat_score,
-        threatFactors=i.threat_factors or [],
+        threatFactors=[ThreatFactorSchema(**tf) if isinstance(tf, dict) else tf for tf in (i.threat_factors or [])],
         explainableReason=i.explainable_reason,
         environmentalCondition=i.environment,
         aiReliability=i.ai_reliability,
         visibilityScore=i.visibility_score,
-        snapshotUrl=i.snapshot_url,
+        snapshotUrl=snap_url,
         zoneName=i.zone_name,
         loiteringDurationSec=i.loitering_duration_sec,
         speedKmh=i.speed_kmh,
@@ -70,8 +120,20 @@ def map_incident_to_response(i: IncidentModel) -> IncidentResponse:
 
 
 @router.get("", response_model=List[IncidentResponse])
-def get_incidents(db: Session = Depends(get_db)):
-    incidents = db.query(IncidentModel).all()
+def get_incidents(
+    demo_only: bool = Query(True, description="Filter to genuine incidents with physically retrievable evidence"),
+    all: bool = Query(False, description="Administrative access to all historical database records"),
+    db: Session = Depends(get_db)
+):
+    incidents = db.query(IncidentModel).order_by(IncidentModel.timestamp.desc()).all()
+    if demo_only and not all:
+        results = []
+        for inc in incidents:
+            has_file, valid_url = has_physical_evidence(inc, db)
+            if has_file:
+                results.append(map_incident_to_response(inc, valid_url))
+        return results
+
     return [map_incident_to_response(i) for i in incidents]
 
 @router.get("/{incident_id}", response_model=IncidentResponse)
@@ -81,7 +143,8 @@ def get_incident_by_id(incident_id: str, db: Session = Depends(get_db)):
     ).first()
     if not i:
         raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
-    return map_incident_to_response(i)
+    has_file, valid_url = has_physical_evidence(i, db)
+    return map_incident_to_response(i, valid_url if has_file else None)
 
 @router.post("", response_model=IncidentResponse, status_code=status.HTTP_201_CREATED)
 def create_incident(inc_in: IncidentCreate, db: Session = Depends(get_db)):

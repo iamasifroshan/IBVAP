@@ -81,10 +81,41 @@ class Settings:
     OCR_MAX_CHARACTERS: int = int(os.getenv("OCR_MAX_CHARACTERS", "12"))
     # Temporal OCR stability window (majority vote over last N frames per VTRK#)
     OCR_STABILITY_WINDOW: int = int(os.getenv("OCR_STABILITY_WINDOW", "5"))
+    # OCR sampling stride (run OCR every N frames for a vehicle to save CPU)
+    OCR_SAMPLE_STRIDE: int = int(os.getenv("OCR_SAMPLE_STRIDE", "3"))
     # Minimum IoU threshold to associate plate ROI with vehicle ROI
     PLATE_ASSOCIATION_IOU_THRESHOLD: float = float(os.getenv("PLATE_ASSOCIATION_IOU_THRESHOLD", "0.30"))
     # Time-to-live for plate result cache in seconds
     PLATE_RESULT_TTL: int = int(os.getenv("PLATE_RESULT_TTL", "300"))
+
+    # ── Suspicious Activity Detection Configurations ─────────────────────────
+    SUSPICIOUS_ACTIVITY_ENABLED: bool = os.getenv("SUSPICIOUS_ACTIVITY_ENABLED", "True").lower() in ("true", "1", "yes")
+    SUSPICIOUS_LOITERING_SECONDS: float = float(os.getenv("SUSPICIOUS_LOITERING_SECONDS", "30.0"))
+    SUSPICIOUS_STATIONARY_SECONDS: float = float(os.getenv("SUSPICIOUS_STATIONARY_SECONDS", "30.0"))
+    SUSPICIOUS_SPEED_THRESHOLD: float = float(os.getenv("SUSPICIOUS_SPEED_THRESHOLD", "0.35"))
+    SUSPICIOUS_MIN_TRACK_SAMPLES: int = int(os.getenv("SUSPICIOUS_MIN_TRACK_SAMPLES", "5"))
+    SUSPICIOUS_EVENT_COOLDOWN_SECONDS: float = float(os.getenv("SUSPICIOUS_EVENT_COOLDOWN_SECONDS", "300.0"))
+    SUSPICIOUS_RESTRICTED_ZONE_SECONDS: float = float(os.getenv("SUSPICIOUS_RESTRICTED_ZONE_SECONDS", "10.0"))
+    SUSPICIOUS_LOITERING_MAX_NET_DISPLACEMENT: float = float(os.getenv("SUSPICIOUS_LOITERING_MAX_NET_DISPLACEMENT", "0.12"))
+    SUSPICIOUS_LOITERING_MIN_PATH_LENGTH: float = float(os.getenv("SUSPICIOUS_LOITERING_MIN_PATH_LENGTH", "0.10"))
+    SUSPICIOUS_STATIONARY_MAX_PATH_LENGTH: float = float(os.getenv("SUSPICIOUS_STATIONARY_MAX_PATH_LENGTH", "0.03"))
+
+    # ── Night-Time Movement Detection Configurations ─────────────────────────
+    NIGHT_MOVEMENT_ENABLED: bool = os.getenv("NIGHT_MOVEMENT_ENABLED", "True").lower() in ("true", "1", "yes")
+    NIGHT_AVG_LUMA_THRESHOLD: float = float(os.getenv("NIGHT_AVG_LUMA_THRESHOLD", "65.0"))
+    NIGHT_MIN_DARK_PIXEL_RATIO: float = float(os.getenv("NIGHT_MIN_DARK_PIXEL_RATIO", "0.40"))
+    NIGHT_MOVEMENT_MIN_SAMPLES: int = int(os.getenv("NIGHT_MOVEMENT_MIN_SAMPLES", "5"))
+    NIGHT_MOVEMENT_MIN_DISPLACEMENT: float = float(os.getenv("NIGHT_MOVEMENT_MIN_DISPLACEMENT", "0.03"))
+    NIGHT_MOVEMENT_MIN_PATH_LENGTH: float = float(os.getenv("NIGHT_MOVEMENT_MIN_PATH_LENGTH", "0.04"))
+    NIGHT_EVENT_COOLDOWN_SECONDS: float = float(os.getenv("NIGHT_EVENT_COOLDOWN_SECONDS", "300.0"))
+
+
+    # ── Command & Control (C2) Integration Configurations ────────────────────
+    C2_INTEGRATION_ENABLED: bool = os.getenv("C2_INTEGRATION_ENABLED", "False").lower() in ("true", "1", "yes")
+    C2_ENDPOINT: str = os.getenv("C2_ENDPOINT", "")
+    C2_API_KEY: str = os.getenv("C2_API_KEY", "")
+    C2_TIMEOUT_SECONDS: float = float(os.getenv("C2_TIMEOUT_SECONDS", "5.0"))
+    C2_MAX_RETRIES: int = int(os.getenv("C2_MAX_RETRIES", "3"))
 
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:5173",

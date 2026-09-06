@@ -273,3 +273,92 @@ class ANPRObservationModel(Base):
     last_seen = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     created_at = Column(DateTime, default=_utcnow)
 
+
+class SuspiciousActivityModel(Base):
+    __tablename__ = "suspicious_activities"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    activity_id = Column(String, unique=True, index=True, nullable=False)
+    camera_id = Column(String, nullable=False, index=True)
+    track_id = Column(Integer, nullable=False, index=True)
+    track_label = Column(String, nullable=False)
+    activity_type = Column(String, nullable=False, index=True)
+    severity = Column(String, nullable=False, default="MEDIUM")
+    started_at = Column(DateTime, default=_utcnow)
+    detected_at = Column(DateTime, default=_utcnow)
+    duration_sec = Column(Float, default=0.0)
+    zone_name = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    incident_id = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class NightMovementModel(Base):
+    __tablename__ = "night_movements"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    movement_id = Column(String, unique=True, index=True, nullable=False)
+    camera_id = Column(String, nullable=False, index=True)
+    track_id = Column(Integer, nullable=False, index=True)
+    track_label = Column(String, nullable=False)
+    avg_luma = Column(Float, nullable=False)
+    dark_pixel_ratio = Column(Float, nullable=False)
+    displacement = Column(Float, nullable=False)
+    path_length = Column(Float, nullable=False)
+    samples_count = Column(Integer, nullable=False, default=5)
+    incident_id = Column(String, nullable=True, index=True)
+    detected_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class SecurityEventModel(Base):
+    """
+    Unified Security Event model that correlates signals (FRS, Fence, Suspicious, Night Movement, ANPR)
+    around the same camera-local tracked subject.
+    """
+    __tablename__ = "security_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id = Column(String, unique=True, index=True, nullable=False)
+    camera_id = Column(String, nullable=False, index=True)
+    camera_name = Column(String, default="Camera")
+    subject_type = Column(String, default="human", nullable=False)  # human / vehicle
+    track_id = Column(Integer, nullable=False, index=True)
+    track_label = Column(String, nullable=False)  # TRK#27 or VTRK#8
+    threat_level = Column(String, default="low", nullable=False, index=True)  # low / medium / high / critical
+    threat_score = Column(Integer, default=20, nullable=False)
+    threat_reason = Column(Text, nullable=False)
+    status = Column(String, default="active", nullable=False, index=True)  # active / resolved
+    contributing_signals = Column(JSON, default=list)  # list of signal name strings
+    related_incident_ids = Column(JSON, default=list)
+    related_evidence_ids = Column(JSON, default=list)
+    snapshot_url = Column(String, default="")
+    face_info = Column(JSON, nullable=True)
+    vehicle_info = Column(JSON, nullable=True)
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class C2DeliveryModel(Base):
+    """
+    C2 Event Delivery audit and state tracking table.
+    Records delivery lifecycle (PENDING, SENT, ACKNOWLEDGED, FAILED)
+    and response telemetry for external Command & Control integration.
+    """
+    __tablename__ = "c2_deliveries"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    security_event_id = Column(String, nullable=False, index=True)
+    event_type = Column(String, nullable=False, default="UNIFIED_SECURITY_EVENT")
+    status = Column(String, nullable=False, default="PENDING", index=True)  # PENDING, SENT, ACKNOWLEDGED, FAILED
+    attempt_count = Column(Integer, default=1, nullable=False)
+    last_attempt_at = Column(DateTime, default=_utcnow)
+    acknowledged_at = Column(DateTime, nullable=True)
+    response_status = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+

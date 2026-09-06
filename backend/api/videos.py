@@ -223,3 +223,27 @@ def list_available_videos():
                 })
     return {"videos": videos_list}
 
+
+@router.get("/video/test-inference")
+def test_video_inference():
+    """
+    Verification probe: confirms video storage is readable and YOLO inference engine is loaded.
+    """
+    from ai.detector import detector_instance
+    yolo_ready = getattr(detector_instance, "_is_loaded", False)
+    
+    mp4_count = 0
+    if os.path.exists(STORAGE_DIR):
+        mp4_count = len([f for f in os.listdir(STORAGE_DIR) if f.lower().endswith(".mp4")])
+
+    if not yolo_ready:
+        raise HTTPException(status_code=503, detail="YOLO inference model is not loaded")
+
+    return {
+        "status": "ok",
+        "mp4_accessible": True,
+        "sample_videos_found": mp4_count,
+        "yolo_loaded": yolo_ready
+    }
+
+

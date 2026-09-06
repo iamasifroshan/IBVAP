@@ -7,7 +7,8 @@ import {
   Camera,
   VirtualZone,
   SyncQueueItem,
-  SystemMetrics
+  SystemMetrics,
+  UnifiedSecurityEvent,
 } from '../types';
 import { MOCK_CAMERAS, MOCK_INCIDENTS, MOCK_ZONES, MOCK_SYNC_QUEUE, INITIAL_METRICS } from '../mock/data';
 import { ibvapApi } from '../services/apiClient';
@@ -24,6 +25,9 @@ interface AppContextType {
   zones: VirtualZone[];
   syncQueue: SyncQueueItem[];
   metrics: SystemMetrics;
+  securityEvents: UnifiedSecurityEvent[];
+  setSecurityEvents: React.Dispatch<React.SetStateAction<UnifiedSecurityEvent[]>>;
+  refreshSecurityEvents: () => Promise<void>;
   selectedIncident: Incident | null;
   setSelectedIncident: (inc: Incident | null) => void;
   explainableIncident: Incident | null;
@@ -124,6 +128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [zones, setZones] = useState<VirtualZone[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<UnifiedSecurityEvent[]>([]);
 
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.SYNC_QUEUE);
@@ -269,6 +274,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (faceErr) {
           console.warn("Failed to load registered people count:", faceErr);
         }
+
+        // Fail-safe load of unified security events
+        try {
+          const liveSecEvents = await ibvapApi.getSecurityEvents({ limit: 50 });
+          if (liveSecEvents) {
+            setSecurityEvents(liveSecEvents);
+          }
+        } catch (secErr) {
+          console.warn("Failed to load security events:", secErr);
+        }
       } catch (err) {
         console.warn("Failed to load backend data:", err);
         // DO NOT overwrite state with mock data or empty arrays here.
@@ -357,6 +372,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const data = JSON.parse(event.data);
           if (data.type === 'incident_event') {
             loadBackendData().catch(console.error);
+          } else if (
+            data.event_type === 'SECURITY_EVENT_UPDATED' ||
+            data.type === 'SECURITY_EVENT_UPDATED' ||
+            data.type === 'security_event_update' ||
+            data.event_type === 'SECURITY_EVENT_RESOLVED' ||
+            data.type === 'SECURITY_EVENT_RESOLVED' ||
+            data.type === 'security_event_resolved'
+          ) {
+            const ev = data.data || data.payload;
+            if (ev && ev.event_id) {
+              setSecurityEvents(prev => {
+                const idx = prev.findIndex(item => item.event_id === ev.event_id);
+                if (idx >= 0) {
+                  const updated = [...prev];
+                  updated[idx] = { ...updated[idx], ...ev };
+                  return updated;
+                } else {
+                  return [ev, ...prev];
+                }
+              });
+            }
           }
         } catch (e) {
           console.error("Failed to parse WS message", e);
@@ -531,6 +567,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const refreshSecurityEvents = async () => {
+    try {
+      const liveSecEvents = await ibvapApi.getSecurityEvents({ limit: 50 });
+      if (liveSecEvents) {
+        setSecurityEvents(liveSecEvents);
+      }
+    } catch (e) {
+      console.warn("Failed to refresh security events:", e);
+    }
+  };
+
   return (
     <AppContext.Provider value={{
       activePage,
@@ -544,6 +591,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       zones,
       syncQueue,
       metrics,
+      securityEvents,
+      setSecurityEvents,
+      refreshSecurityEvents,
       selectedIncident,
       setSelectedIncident,
       explainableIncident,

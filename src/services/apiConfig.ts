@@ -74,6 +74,27 @@ export const API_ROUTES = {
   // Analytics
   analytics:      `${API_BASE_URL}/analytics/summary`,
   threatHistory:  `${API_BASE_URL}/analytics/threats`,
+  anprStats:      `${API_BASE_URL}/anpr/stats`,
+  anprSearch:     `${API_BASE_URL}/anpr/search`,
+  suspiciousActivities: `${API_BASE_URL}/suspicious-activities`,
+  suspiciousActivityStats: `${API_BASE_URL}/suspicious-activities/stats`,
+  cameraSuspiciousActivities: (cameraId: string) => `${API_BASE_URL}/cameras/${cameraId}/suspicious-activities`,
+  nightMovements: `${API_BASE_URL}/night-movements`,
+  nightMovementStats: `${API_BASE_URL}/night-movements/stats`,
+  cameraNightMovements: (cameraId: string) => `${API_BASE_URL}/cameras/${cameraId}/night-movements`,
+
+  // Unified Security Events (Phase 4)
+  securityEvents: `${API_BASE_URL}/security-events`,
+  securityEventStats: `${API_BASE_URL}/security-events/stats`,
+  securityEventById: (id: string) => `${API_BASE_URL}/security-events/${id}`,
+  cameraSecurityEvents: (cameraId: string) => `${API_BASE_URL}/cameras/${cameraId}/security-events`,
+
+  // Command & Control Integration (Phase 6)
+  c2Status: `${API_BASE_URL}/c2/status`,
+  c2Events: `${API_BASE_URL}/c2/events`,
+  c2EventById: (id: string) => `${API_BASE_URL}/c2/events/${id}`,
+  c2TestEvent: `${API_BASE_URL}/c2/test-event`,
+  c2SimulatedReceiver: `${API_BASE_URL}/c2/simulated-receiver`,
 
   // Environment
   envCondition:   `${API_BASE_URL}/environment/condition`,

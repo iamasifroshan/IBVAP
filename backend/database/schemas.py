@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 class ThreatFactorSchema(BaseModel):
@@ -269,6 +269,7 @@ class SearchQueryRequest(BaseModel):
 class SearchQueryResponse(BaseModel):
     filters: dict
     results: List[IncidentResponse]
+    security_events: Optional[List[Any]] = Field(default_factory=list)
 
 
 # Face Recognition Schemas
@@ -345,3 +346,89 @@ class ANPRStatsResponse(BaseModel):
     unique_plates: int
     valid_format_count: int
     by_camera: Dict[str, int]
+
+
+class SuspiciousActivityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    activity_id: str
+    camera_id: str
+    track_id: int
+    track_label: str
+    activity_type: str
+    severity: str
+    started_at: datetime
+    detected_at: datetime
+    duration_sec: float
+    zone_name: Optional[str] = None
+    description: Optional[str] = None
+    incident_id: Optional[str] = None
+    created_at: datetime
+
+
+class SuspiciousActivityStatsResponse(BaseModel):
+    total_suspicious_activities: int
+    activity_type_breakdown: Dict[str, int]
+    camera_breakdown: Dict[str, int]
+    severity_breakdown: Dict[str, int]
+
+
+class NightMovementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    movement_id: str
+    camera_id: str
+    track_id: int
+    track_label: str
+    avg_luma: float
+    dark_pixel_ratio: float
+    displacement: float
+    path_length: float
+    samples_count: int
+    incident_id: Optional[str] = None
+    detected_at: datetime
+    created_at: datetime
+
+
+class NightMovementStatsResponse(BaseModel):
+    total_night_movements: int
+    camera_breakdown: Dict[str, int]
+
+
+class SecurityEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    event_id: str
+    camera_id: str
+    camera_name: str = "Camera"
+    subject_type: str = "human"
+    track_id: int
+    track_label: str
+    threat_level: str
+    threat_score: int
+    threat_reason: str
+    status: str
+    contributing_signals: List[str] = Field(default_factory=list)
+    related_incident_ids: List[str] = Field(default_factory=list)
+    related_evidence_ids: List[str] = Field(default_factory=list)
+    snapshot_url: str = ""
+    face_info: Optional[Dict[str, Any]] = None
+    vehicle_info: Optional[Dict[str, Any]] = None
+    first_seen: datetime
+    last_seen: datetime
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class SecurityEventStatsResponse(BaseModel):
+    total_events: int
+    active_events: int
+    resolved_events: int
+    threat_level_breakdown: Dict[str, int]
+    camera_breakdown: Dict[str, int]
+    contributing_signal_breakdown: Dict[str, int]
+
+

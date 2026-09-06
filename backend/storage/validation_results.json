@@ -1,0 +1,134 @@
+{
+  "TEST A": {
+    "expected": "0 suspicious events, tracking active",
+    "actual": "0 suspicious API returns, 0 WS events",
+    "pass": true
+  },
+  "TEST B": {
+    "expected": "0 suspicious events (duration < 30s)",
+    "actual": "0 suspicious API returns, 0 WS events",
+    "pass": true
+  },
+  "TEST C": {
+    "expected": "Exactly 1 SUSPICIOUS_UNUSUAL_STOP incident & 1 WS event across 48 frames",
+    "actual": "1 incidents in DB, 1 WS events, type: UNUSUAL_STOP",
+    "pass": true,
+    "activity_id": "ACT-SUSP-B8AABE61",
+    "incident_id": "INC-SUSP-098000D6",
+    "track_id": "TRK#15",
+    "duration": 30.0,
+    "severity": "MEDIUM",
+    "evidence_id": "022989cd-d6ce-4cd7-bc72-62765dda74cb"
+  },
+  "TEST D": {
+    "expected": "Exactly 1 SUSPICIOUS_LOITERING incident & 1 WS event across 48 frames",
+    "actual": "1 incidents in DB, 1 WS events, type: LOITERING",
+    "pass": true,
+    "activity_id": "ACT-SUSP-1321B632",
+    "incident_id": "INC-SUSP-2314096A",
+    "track_id": "TRK#15",
+    "duration": 30.0,
+    "severity": "MEDIUM",
+    "evidence_id": "fe19c270-8814-4098-aff3-86b8794e9e81"
+  },
+  "TEST E": {
+    "expected": "Exactly 1 SUSPICIOUS_RAPID_MOVEMENT incident & 1 WS event",
+    "actual": "1 incidents in DB, 1 WS events, type: RAPID_MOVEMENT",
+    "pass": true,
+    "activity_id": "ACT-SUSP-F302921D",
+    "incident_id": "INC-SUSP-763B7D09",
+    "track_id": "TRK#21",
+    "measured_speed_samples": [
+      "0.75 norm/sec",
+      "0.75 norm/sec",
+      "0.75 norm/sec",
+      "0.75 norm/sec",
+      "0.75 norm/sec"
+    ],
+    "qualifying_samples": 5,
+    "severity": "HIGH",
+    "evidence_id": "3d8745a1-715b-44a4-960c-e5a819ab2352"
+  },
+  "TEST F": {
+    "expected": "Exactly 1 SUSPICIOUS_RESTRICTED_ZONE_BEHAVIOR incident & 1 WS event across 28 frames",
+    "actual": "1 incidents in DB, 1 WS events, type: RESTRICTED_ZONE_BEHAVIOR",
+    "pass": true,
+    "activity_id": "ACT-SUSP-451322EC",
+    "incident_id": "INC-SUSP-A5A5CAA8",
+    "track_id": "TRK#22",
+    "duration": 10.0,
+    "zone": "South Trench Zone Alpha",
+    "severity": "HIGH",
+    "evidence_id": "25608bc1-2c08-4e7a-bd31-7c14bfa3073b"
+  },
+  "NEGATIVE TESTS": {
+    "expected": "0 suspicious events across all negative conditions",
+    "actual": "Multiple people: 0 acts, Short bursts: 0 acts",
+    "pass": true
+  },
+  "DATABASE VALIDATION": {
+    "cameras": 4,
+    "incidents_before": 128,
+    "incidents_after": 132,
+    "suspicious_incidents_created": 4,
+    "suspicious_activities": 4,
+    "evidence_before": 56,
+    "evidence_after": 60,
+    "evidence_created": 4,
+    "registered_people": 3,
+    "anpr_observations": 0,
+    "pass": true
+  },
+  "WEBSOCKET VALIDATION": {
+    "total_emitted": 4,
+    "expected": 4,
+    "schema_valid": true,
+    "events": [
+      {
+        "activity_type": "UNUSUAL_STOP",
+        "camera_id": "BORDER-CAM-07",
+        "track_label": "TRK#15",
+        "incident_id": "INC-SUSP-098000D6",
+        "missing_fields": []
+      },
+      {
+        "activity_type": "LOITERING",
+        "camera_id": "SECTOR-B-CAM-03",
+        "track_label": "TRK#15",
+        "incident_id": "INC-SUSP-2314096A",
+        "missing_fields": []
+      },
+      {
+        "activity_type": "RAPID_MOVEMENT",
+        "camera_id": "BOP-NORTH-02",
+        "track_label": "TRK#21",
+        "incident_id": "INC-SUSP-763B7D09",
+        "missing_fields": []
+      },
+      {
+        "activity_type": "RESTRICTED_ZONE_BEHAVIOR",
+        "camera_id": "BORDER-CAM-07",
+        "track_label": "TRK#22",
+        "incident_id": "INC-SUSP-A5A5CAA8",
+        "missing_fields": []
+      }
+    ],
+    "pass": true
+  },
+  "UI & ANALYTICS VALIDATION": {
+    "suspicious_activities_api_status": 200,
+    "suspicious_activities_count": 4,
+    "stats_api_status": 200,
+    "stats_total": 4,
+    "stats_breakdown": {
+      "LOITERING": 1,
+      "RAPID_MOVEMENT": 1,
+      "RESTRICTED_ZONE_BEHAVIOR": 1,
+      "UNUSUAL_STOP": 1
+    },
+    "camera_acts_status": 200,
+    "sentinel_search_status": 200,
+    "sentinel_results_count": 1,
+    "pass": true
+  }
+}

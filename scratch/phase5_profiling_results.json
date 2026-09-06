@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-09-06T12:11:10.702139+00:00",
+  "performance": {
+    "inference_fps": 8.68,
+    "avg_frame_latency_ms": 115.16,
+    "yolo_ms": 50.48,
+    "yunet_ms": 0.38,
+    "sface_ms": 0.01,
+    "anpr_ocr_ms": 61.04,
+    "suspicious_overhead_ms": 1.9,
+    "night_movement_overhead_ms": 0.9,
+    "unified_intelligence_overhead_ms": 0.45,
+    "cpu_usage_percent": 80.5,
+    "ram_usage_mb": 593.9,
+    "gpu_available": false,
+    "db_write_frequency": "Batched / State-change only (deduplicated)"
+  },
+  "reliability": {
+    "video_unavailable_handled": true,
+    "corrupted_frame_rejected": true,
+    "empty_frame_detected": true,
+    "stale_tracks_pruned": true,
+    "identity_semantics_preserved": true,
+    "dead_ws_pruned": true
+  },
+  "demo_scenarios": {
+    "Scenario 1 - Known Person": true,
+    "Scenario 2 - Unknown Person": true,
+    "Scenario 3 - Vehicle Classification": true,
+    "Scenario 4 - ANPR Normalization & Indian RTO Format": true,
+    "Scenario 5 - Virtual Fence Breach": true,
+    "Scenario 6 - Suspicious Activity (Loitering)": true,
+    "Scenario 7 - Night Movement Alone": true,
+    "Scenario 8 - Combined Threat (Unknown + Night + Suspicious)": true,
+    "Scenario 9 - Normal Multi-Person": true,
+    "Scenario 10 - Normal Vehicle Transit": true
+  },
+  "multi_camera": {
+    "concurrent_channels": 3,
+    "total_operations": 90,
+    "elapsed_sec": 0.08,
+    "throughput_ops_per_sec": 1154.3,
+    "status": "PASS"
+  }
+}

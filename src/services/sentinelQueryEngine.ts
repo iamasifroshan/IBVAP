@@ -14,6 +14,7 @@ export interface StructuredSearchFilters {
   extractedEventType?: string;
   extractedEnvironment?: EnvironmentCondition | string;
   extractedPlate?: string;
+  extractedTrack?: string;
   validated: boolean;
   confidence: number;
   recognizedSlots?: string[];
@@ -22,10 +23,12 @@ export interface StructuredSearchFilters {
   _startHour?: number;
   _endHour?: number;
   _dateFilter?: string;
+  _suspiciousType?: string;
+  _trackFilter?: string;
 }
 
 export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
-  const q = (queryText || '').toLowerCase().strip ? (queryText || '').toLowerCase().trim() : (queryText || '').toLowerCase();
+  const q = (queryText || '').toLowerCase().trim();
 
   if (!q) {
     return {
@@ -133,7 +136,7 @@ export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
   } else if (/\b(at night|during night|night condition|in the dark)\b/i.test(q)) {
     extractedEnvironment = 'night';
   } else if (/\b(rain|rainy|raining|downpour)\b/i.test(q)) {
-    extractedEnvironment = 'rain';
+    extractedEnvironment = 'fog'; // 'rain' maps to fog (nearest EnvironmentCondition)
   } else if (/\bdust\b/i.test(q)) {
     extractedEnvironment = 'dust';
   }
@@ -167,16 +170,41 @@ export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
     _endHour = 24;
   }
 
-  // 7. Event Type
+  // 7. Event Type & Suspicious Behavior
   let extractedEventType = 'Security Incident';
-  if (/\b(intrusion|breach|trespass|crossed|crossing)\b/i.test(q)) {
-    extractedEventType = 'Restricted Zone Breach';
+  let _suspiciousType: string | undefined = undefined;
+  if (q.includes('unusual stop')) {
+    _suspiciousType = 'SUSPICIOUS_UNUSUAL_STOP';
+    extractedEventType = 'Unusual Stop';
   } else if (q.includes('loitering')) {
-    extractedEventType = 'Loitering Event';
+    _suspiciousType = 'SUSPICIOUS_LOITERING';
+    extractedEventType = 'Loitering';
+  } else if (q.includes('rapid movement')) {
+    _suspiciousType = 'SUSPICIOUS_RAPID_MOVEMENT';
+    extractedEventType = 'Rapid Movement';
+  } else if (q.includes('restricted zone behavior') || q.includes('zone behavior')) {
+    _suspiciousType = 'SUSPICIOUS_RESTRICTED_ZONE_BEHAVIOR';
+    extractedEventType = 'Restricted Zone Behavior';
+  } else if (q.includes('suspicious activity') || q.includes('suspicious')) {
+    _suspiciousType = 'SUSPICIOUS';
+    extractedEventType = 'Suspicious Activity';
+  } else if (q.includes('night movement') || q.includes('night-time movement') || q.includes('night walking') || q.includes('movement at night')) {
+    _suspiciousType = 'NIGHT_MOVEMENT_DETECTED';
+    extractedEventType = 'Night Movement';
+  } else if (/\b(intrusion|breach|trespass|crossed|crossing)\b/i.test(q)) {
+    extractedEventType = 'Restricted Zone Breach';
+
   } else if (q.includes('vehicle')) {
     extractedEventType = 'Vehicle Movement';
   } else if (q.includes('people') || q.includes('human')) {
     extractedEventType = 'Human Detection';
+  }
+
+  // 8. Track extraction
+  let _trackFilter: string | undefined = undefined;
+  const trkMatch = q.match(/\b(?:trk#?|track\s*#?)\s*(\d+)\b/i);
+  if (trkMatch) {
+    _trackFilter = `TRK#${trkMatch[1]}`;
   }
 
   // Calculate recognized slots
@@ -188,18 +216,22 @@ export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
   if (extractedEnvironment) recognizedSlots.push(`Environment: ${extractedEnvironment.toUpperCase()}`);
   if (_dateFilter) recognizedSlots.push(`Date: ${_dateFilter === 'yesterday' ? 'Yesterday' : _dateFilter === 'last_night' ? 'Last Night' : 'Today'}`);
   if (_startHour !== undefined || q.includes('last night')) recognizedSlots.push(`Time: ${extractedTimeRange}`);
+  if (_trackFilter) recognizedSlots.push(`Track: ${_trackFilter}`);
+  if (_suspiciousType) recognizedSlots.push(`Behavior: ${extractedEventType}`);
 
   const validated = recognizedSlots.length > 0;
   const confidence = validated ? Math.min(95.4, Number((65.0 + recognizedSlots.length * 5.8).toFixed(1))) : 0.0;
 
   const missingSlots: string[] = [];
-  if (!extractedObject) missingSlots.push('Object / Target Class');
+  if (!extractedObject && !_trackFilter) missingSlots.push('Object / Target Class');
   if (!extractedSector && !extractedCamera) missingSlots.push('Sector or Camera Location');
   if (_startHour === undefined && !_dateFilter) missingSlots.push('Time Range / Date');
 
   const intentParts: string[] = [];
+  if (_trackFilter) intentParts.push(_trackFilter);
   if (extractedObject) intentParts.push(`${extractedObject} targets`);
-  else intentParts.push('all target types');
+  else if (!_trackFilter) intentParts.push('all target types');
+  if (_suspiciousType) intentParts.push(`exhibiting ${extractedEventType.toLowerCase()}`);
   if (extractedSector) intentParts.push(`in ${extractedSector}`);
   if (extractedOutpost) intentParts.push(`near ${extractedOutpost}`);
   if (extractedCamera) intentParts.push(`on ${extractedCamera}`);
@@ -214,7 +246,7 @@ export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
   return {
     rawQuery: queryText,
     intentSummary,
-    extractedObject: (extractedObject ? extractedObject.charAt(0).toUpperCase() + extractedObject.slice(1) : 'Any Target') as any,
+    extractedObject: (extractedObject ? extractedObject.charAt(0).toUpperCase() + extractedObject.slice(1) : (_trackFilter ? 'Human' : 'Any Target')) as any,
     extractedCamera: extractedCamera || 'All Cameras',
     extractedSector: extractedSector || 'All Sectors',
     extractedOutpost,
@@ -224,13 +256,16 @@ export function parseSentinelQuery(queryText: string): StructuredSearchFilters {
     extractedTimeRange,
     extractedEventType,
     extractedEnvironment: extractedEnvironment ? extractedEnvironment.toUpperCase() : 'Any',
+    extractedTrack: _trackFilter,
     validated,
     confidence,
     recognizedSlots,
     missingSlots,
     _startHour,
     _endHour,
-    _dateFilter
+    _dateFilter,
+    _suspiciousType,
+    _trackFilter,
   };
 }
 
@@ -324,6 +359,34 @@ export function searchIncidentVault(incidents: Incident[], filters: StructuredSe
         }
       }
     }
+
+    // 8. Track matching
+    if (filters._trackFilter) {
+      const tf = filters._trackFilter.toUpperCase();
+      const rawNum = tf.replace('TRK#', '');
+      const incTrk = (inc.trackId || (inc as any).track_id || '').toUpperCase();
+      if (!incTrk.includes(tf) && !incTrk.includes(`TRACK-${rawNum}`) && incTrk !== rawNum) {
+        return false;
+      }
+    }
+
+    // 9. Suspicious behavior / Night movement matching
+    if (filters._suspiciousType) {
+      const st = filters._suspiciousType.toUpperCase();
+      const incType = (inc.eventType || (inc as any).event_type || '').toUpperCase();
+      const incReason = (inc.explainableReason || (inc as any).explainable_reason || '').toLowerCase();
+      if (st === 'NIGHT_MOVEMENT_DETECTED') {
+        const matches = incType.includes('NIGHT_MOVEMENT') || incReason.includes('night-time movement') || incReason.includes('night movement');
+        if (!matches) return false;
+      } else if (st === 'SUSPICIOUS') {
+        const isSusp = incType.startsWith('SUSPICIOUS_') || incReason.includes('stationary') || incReason.includes('loiter') || incReason.includes('rapid movement') || incReason.includes('restricted zone');
+        if (!isSusp) return false;
+      } else {
+        const matches = incType.includes(st) || (st === 'SUSPICIOUS_LOITERING' && incType.includes('LOITERING'));
+        if (!matches) return false;
+      }
+    }
+
 
     return true;
   });

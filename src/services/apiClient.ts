@@ -26,7 +26,17 @@ import type {
   VehicleStats,
   ANPRObservation,
   ANPRStats,
+  SuspiciousActivity,
+  SuspiciousActivityStats,
+  NightMovement,
+  NightMovementStats,
+  UnifiedSecurityEvent,
+  SecurityEventStats,
+  C2Status,
+  C2DeliveryRecord,
+  C2DeliveryResponse,
 } from '../types';
+
 import type { StructuredSearchFilters } from './sentinelQueryEngine';
 
 import {
@@ -289,27 +299,30 @@ export const ibvapApi = {
     const CAMERA_DEMO_FILES: Record<string, string> = {
       'BORDER-CAM-07': 'gettyimages-2215078536-640_adpp.mp4',
       'SECTOR-B-CAM-03': 'gettyimages-2213890215-640_adpp.mp4',
-      'BOP-NORTH-02': '12522257-hd_1920_1080_24fps.mp4',
+      'BOP-NORTH-02': 'bop_north_02.mp4',
       'SOUTH-TRENCH-10': '17502678-hd_1080_1920_30fps.mp4',
     };
 
+    const canonicalDemo = CAMERA_DEMO_FILES[camera.id];
+
     if (camera.protocol === 'SIMULATED_FILE' || camera.streamUrl?.endsWith('.mp4')) {
-      const filename = camera.streamUrl?.split(/[/\\]/).pop() || CAMERA_DEMO_FILES[camera.id];
+      let filename = camera.streamUrl?.split(/[/\\]/).pop();
+      if (canonicalDemo && (!filename || filename.includes('test_sample') || filename.includes('dummy'))) {
+        filename = canonicalDemo;
+      }
       if (filename) {
         return `${host}/videos/${filename}`;
       }
     }
     // Return MJPEG stream for RTSP or Webcams if explicitly streaming, else demo video
     if (camera.protocol === 'RTSP' || camera.streamUrl?.startsWith('rtsp')) {
-      const demoFile = CAMERA_DEMO_FILES[camera.id];
-      if (demoFile) {
-        return `${host}/videos/${demoFile}`;
+      if (canonicalDemo) {
+        return `${host}/videos/${canonicalDemo}`;
       }
       return `${host}/api/v1/cameras/${camera.id}/stream`;
     }
-    const fallbackFile = CAMERA_DEMO_FILES[camera.id];
-    if (fallbackFile) {
-      return `${host}/videos/${fallbackFile}`;
+    if (canonicalDemo) {
+      return `${host}/videos/${canonicalDemo}`;
     }
     return null;
   },
@@ -516,6 +529,32 @@ export const ibvapApi = {
     );
   },
 
+  // ── GET /api/anpr/stats ───────────────────────────────────
+  getAnprStats(): Promise<ANPRStats> {
+    return tryLive(
+      () => apiFetch<ANPRStats>(API_ROUTES.anprStats),
+      { total_reads: 0, unique_plates: 0, valid_format_count: 0, by_camera: {} },
+      'GET /anpr/stats'
+    );
+  },
+
+  // ── GET /api/anpr/search ──────────────────────────────────
+  searchAnprRecords(params: { plate?: string; camera_id?: string; vehicle_class?: string; valid_only?: boolean; limit?: number }): Promise<ANPRObservation[]> {
+    const query = new URLSearchParams();
+    if (params.plate) query.append('plate', params.plate);
+    if (params.camera_id) query.append('camera_id', params.camera_id);
+    if (params.vehicle_class) query.append('vehicle_class', params.vehicle_class);
+    if (params.valid_only !== undefined) query.append('valid_only', String(params.valid_only));
+    if (params.limit) query.append('limit', String(params.limit));
+
+    const url = `${API_ROUTES.anprSearch}?${query.toString()}`;
+    return tryLive(
+      () => apiFetch<ANPRObservation[]>(url),
+      [],
+      'GET /anpr/search'
+    );
+  },
+
   // ── GET /api/environment/condition ────────────────────────
   getEnvironmentCondition(): Promise<{ condition: string; confidence: number; ai_reliability?: number; human_verification_required?: boolean }> {
     return tryLive(
@@ -566,6 +605,9 @@ export const ibvapApi = {
     }>;
     incidents_created_count?: number;
     incident_ids?: string[];
+    suspicious_activities?: any[];
+    night_movements?: any[];
+    security_events?: any[];
   }> {
     const formData = new FormData();
     formData.append('file', fileBlob, 'frame.jpg');
@@ -577,8 +619,12 @@ export const ibvapApi = {
         detections: [],
         vehicle_count: 0,
         vehicle_detections: [],
+        suspicious_activities: [],
+        night_movements: [],
       };
     }
+
+
 
     const url = `${API_ROUTES.detectFrame(cameraId)}?conf_threshold=${confThreshold}`;
     const res = await fetch(url, {
@@ -977,7 +1023,235 @@ export const ibvapApi = {
       return [];
     }
   },
+
+  // ── GET /api/v1/suspicious-activities ──────────────────────
+  async getSuspiciousActivities(params?: {
+    camera_id?: string;
+    activity_type?: string;
+    severity?: string;
+    limit?: number;
+  }): Promise<SuspiciousActivity[]> {
+    if (USE_MOCK) return [];
+    try {
+      const q = new URLSearchParams();
+      if (params?.camera_id) q.set('camera_id', params.camera_id);
+      if (params?.activity_type) q.set('activity_type', params.activity_type);
+      if (params?.severity) q.set('severity', params.severity);
+      if (params?.limit) q.set('limit', String(params.limit));
+      const qs = q.toString() ? `?${q.toString()}` : '';
+      return await apiFetch<SuspiciousActivity[]>(`${API_ROUTES.suspiciousActivities}${qs}`);
+    } catch {
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/suspicious-activities/stats ────────────────
+  async getSuspiciousActivityStats(): Promise<SuspiciousActivityStats> {
+    const empty: SuspiciousActivityStats = {
+      total_suspicious_activities: 0,
+      activity_type_breakdown: {},
+      camera_breakdown: {},
+      severity_breakdown: {},
+    };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<SuspiciousActivityStats>(API_ROUTES.suspiciousActivityStats);
+    } catch {
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/cameras/:id/suspicious-activities ──────────
+  async getCameraSuspiciousActivities(cameraId: string, limit: number = 50): Promise<SuspiciousActivity[]> {
+    if (USE_MOCK) return [];
+    try {
+      return await apiFetch<SuspiciousActivity[]>(`${API_ROUTES.cameraSuspiciousActivities(cameraId)}?limit=${limit}`);
+    } catch {
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/night-movements ─────────────────────────────
+  async getNightMovements(filters?: {
+    cameraId?: string;
+    trackId?: number;
+    limit?: number;
+  }): Promise<NightMovement[]> {
+    if (USE_MOCK) return [];
+    try {
+      const params = new URLSearchParams();
+      if (filters?.cameraId) params.append('camera_id', filters.cameraId);
+      if (filters?.trackId !== undefined) params.append('track_id', String(filters.trackId));
+      if (filters?.limit) params.append('limit', String(filters.limit));
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      return await apiFetch<NightMovement[]>(`${API_ROUTES.nightMovements}${qs}`);
+    } catch {
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/night-movements/stats ───────────────────────
+  async getNightMovementStats(): Promise<NightMovementStats> {
+    const empty: NightMovementStats = {
+      total_night_movements: 0,
+      camera_breakdown: {},
+    };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<NightMovementStats>(API_ROUTES.nightMovementStats);
+    } catch {
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/cameras/:id/night-movements ─────────────────
+  async getCameraNightMovements(cameraId: string, limit: number = 50): Promise<NightMovement[]> {
+    if (USE_MOCK) return [];
+    try {
+      return await apiFetch<NightMovement[]>(`${API_ROUTES.cameraNightMovements(cameraId)}?limit=${limit}`);
+    } catch {
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/security-events ─────────────────────────────
+  async getSecurityEvents(params?: {
+    camera_id?: string;
+    threat_level?: string;
+    status?: string;
+    subject_type?: string;
+    track_id?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<UnifiedSecurityEvent[]> {
+    if (USE_MOCK) return [];
+    try {
+      const q = new URLSearchParams();
+      if (params?.camera_id) q.set('camera_id', params.camera_id);
+      if (params?.threat_level) q.set('threat_level', params.threat_level);
+      if (params?.status) q.set('status', params.status);
+      if (params?.subject_type) q.set('subject_type', params.subject_type);
+      if (params?.track_id !== undefined) q.set('track_id', String(params.track_id));
+      if (params?.limit) q.set('limit', String(params.limit));
+      if (params?.offset) q.set('offset', String(params.offset));
+      const qs = q.toString();
+      const url = qs ? `${API_ROUTES.securityEvents}?${qs}` : API_ROUTES.securityEvents;
+      return await apiFetch<UnifiedSecurityEvent[]>(url);
+    } catch (err) {
+      console.error('[apiClient] getSecurityEvents failed:', err);
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/security-events/:id ─────────────────────────
+  async getSecurityEventById(eventId: string): Promise<UnifiedSecurityEvent | null> {
+    if (USE_MOCK) return null;
+    try {
+      return await apiFetch<UnifiedSecurityEvent>(API_ROUTES.securityEventById(eventId));
+    } catch (err) {
+      console.error('[apiClient] getSecurityEventById failed:', err);
+      return null;
+    }
+  },
+
+  // ── GET /api/v1/security-events/stats ───────────────────────
+  async getSecurityEventStats(): Promise<SecurityEventStats> {
+    const empty: SecurityEventStats = {
+      total_events: 0,
+      active_events: 0,
+      resolved_events: 0,
+      threat_level_breakdown: {},
+      camera_breakdown: {},
+      contributing_signal_breakdown: {},
+    };
+    if (USE_MOCK) return empty;
+    try {
+      return await apiFetch<SecurityEventStats>(API_ROUTES.securityEventStats);
+    } catch (err) {
+      console.error('[apiClient] getSecurityEventStats failed:', err);
+      return empty;
+    }
+  },
+
+  // ── GET /api/v1/cameras/:id/security-events ─────────────────
+  async getCameraSecurityEvents(cameraId: string, limit: number = 50): Promise<UnifiedSecurityEvent[]> {
+    if (USE_MOCK) return [];
+    try {
+      return await apiFetch<UnifiedSecurityEvent[]>(`${API_ROUTES.cameraSecurityEvents(cameraId)}?limit=${limit}`);
+    } catch (err) {
+      console.error('[apiClient] getCameraSecurityEvents failed:', err);
+      return [];
+    }
+  },
+
+  // ── GET /api/v1/c2/status ───────────────────────────────────
+  async getC2Status(): Promise<C2Status> {
+    const fallback: C2Status = {
+      enabled: false,
+      endpoint_configured: false,
+      connected: false,
+      last_delivery: null,
+      delivered_count: 0,
+      failed_count: 0,
+    };
+    if (USE_MOCK) return fallback;
+    try {
+      return await apiFetch<C2Status>(API_ROUTES.c2Status);
+    } catch (err) {
+      console.error('[apiClient] getC2Status failed:', err);
+      return fallback;
+    }
+  },
+
+  // ── GET /api/v1/c2/events ───────────────────────────────────
+  async getC2Deliveries(params?: {
+    status?: string;
+    security_event_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<C2DeliveryResponse> {
+    const fallback: C2DeliveryResponse = {
+      total: 0,
+      limit: params?.limit || 50,
+      offset: params?.offset || 0,
+      deliveries: [],
+    };
+    if (USE_MOCK) return fallback;
+    try {
+      const q = new URLSearchParams();
+      if (params?.status) q.set('status', params.status);
+      if (params?.security_event_id) q.set('security_event_id', params.security_event_id);
+      if (params?.limit) q.set('limit', String(params.limit));
+      if (params?.offset) q.set('offset', String(params.offset));
+      const qs = q.toString();
+      const url = qs ? `${API_ROUTES.c2Events}?${qs}` : API_ROUTES.c2Events;
+      return await apiFetch<C2DeliveryResponse>(url);
+    } catch (err) {
+      console.error('[apiClient] getC2Deliveries failed:', err);
+      return fallback;
+    }
+  },
+
+  // ── GET /api/v1/c2/events/:id ───────────────────────────────
+  async getC2DeliveryById(id: string): Promise<C2DeliveryRecord | null> {
+    if (USE_MOCK) return null;
+    try {
+      return await apiFetch<C2DeliveryRecord>(API_ROUTES.c2EventById(id));
+    } catch (err) {
+      console.error('[apiClient] getC2DeliveryById failed:', err);
+      return null;
+    }
+  },
+
+  // ── POST /api/v1/c2/test-event ──────────────────────────────
+  async triggerC2TestEvent(): Promise<any> {
+    if (USE_MOCK) {
+      return { status: 'mock_skipped', message: 'Mock mode: C2 disabled' };
+    }
+    return await apiFetch<any>(API_ROUTES.c2TestEvent, { method: 'POST' });
+  },
 };
+
 
 // ─────────────────────────────────────────────────────────────
 // Lightweight types for raw backend events
@@ -1039,7 +1313,11 @@ export interface YoloDetectResult {
   saved_tracks_to_db: number;
   incidents_created_count?: number;
   incidents_created?: any[];
+  suspicious_activities?: any[];
+  night_movements?: any[];
+  security_events?: any[];
   track_counts: { new: number; active: number; lost: number; total: number };
+
   detections: RawDetection[];
   tracks: TrackRecord[];
 }

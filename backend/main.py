@@ -26,24 +26,43 @@ from api.training import router as training_router
 from api.ws import router as ws_router
 from api.faces import router as faces_router
 from api.anpr import router as anpr_router
+from api.suspicious import router as suspicious_router
+from api.night_movement import router as night_movement_router
+from api.security_events import router as security_events_router
+from api.c2 import router as c2_router
+
 
 # Initial DB Seeder: seed sample cameras
 def seed_db():
     db = SessionLocal()
     from video.stream_manager import stream_manager
     try:
-        if db.query(CameraModel).count() > 0:
-            # Skip seeding, database is already populated
-            pass
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(base_dir)
-            
-            video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp.mp4")
-            video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp.mp4")
-            video_3 = os.path.join(base_dir, "storage", "videos", "12522257-hd_1920_1080_24fps.mp4")
-            video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps.mp4")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(base_dir)
+        
+        video_1 = os.path.join(base_dir, "storage", "videos", "gettyimages-2215078536-640_adpp.mp4")
+        video_2 = os.path.join(base_dir, "storage", "videos", "gettyimages-2213890215-640_adpp.mp4")
+        video_3 = os.path.join(base_dir, "storage", "videos", "bop_north_02.mp4")
+        video_4 = os.path.join(base_dir, "storage", "videos", "17502678-hd_1080_1920_30fps.mp4")
 
+        canonical_sources = {
+            "BORDER-CAM-07": video_1,
+            "SECTOR-B-CAM-03": video_2,
+            "BOP-NORTH-02": video_3,
+            "SOUTH-TRENCH-10": video_4,
+        }
+
+        if db.query(CameraModel).count() > 0:
+            # Reconcile canonical simulation cameras to ensure valid MP4 paths
+            for cam in db.query(CameraModel).all():
+                if cam.camera_id in canonical_sources:
+                    canon_path = canonical_sources[cam.camera_id]
+                    # If current source_url doesn't exist, is empty, is WEBCAM, contains test_sample, or contains old video
+                    if not cam.source_url or not os.path.exists(cam.source_url) or "test_sample" in cam.source_url or cam.source_type == "WEBCAM" or (cam.camera_id == "BOP-NORTH-02" and "12522257" in cam.source_url):
+                        cam.source_url = canon_path
+                        cam.source_type = "SIMULATED_FILE"
+            db.commit()
+        else:
             # Create or update cameras
             cameras_data = [
             {
@@ -248,6 +267,7 @@ async def lifespan(app: FastAPI):
             print(f"[STARTUP] SFace: ERROR ({e})")
             
         print("[STARTUP] WEBSOCKET: Ready")
+        print(f"[STARTUP] C2 Integration: {'ENABLED (' + settings.C2_ENDPOINT + ')' if settings.C2_INTEGRATION_ENABLED else 'DISABLED'}")
         print("[STARTUP] Storage verified")
         print("[STARTUP] API ready")
         
@@ -275,8 +295,22 @@ app.add_middleware(
 )
 
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 class CORSStaticFiles(StaticFiles):
+    def __init__(self, *args, fallback_directories=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fallback_directories = fallback_directories or []
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 404:
+            for fallback_dir in self.fallback_directories:
+                full_path = os.path.join(fallback_dir, path)
+                if os.path.isfile(full_path):
+                    return FileResponse(full_path, stat_result=os.stat(full_path), method=scope["method"])
+        return response
+
     async def __call__(self, scope, receive, send):
         async def custom_send(message):
             if message["type"] == "http.response.start":
@@ -289,12 +323,24 @@ class CORSStaticFiles(StaticFiles):
         await super().__call__(scope, receive, custom_send)
 
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "evidence")
+PUBLIC_EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "storage", "evidence")
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
-app.mount("/storage/evidence", CORSStaticFiles(directory=EVIDENCE_DIR), name="evidence_storage")
+os.makedirs(PUBLIC_EVIDENCE_DIR, exist_ok=True)
+app.mount(
+    "/storage/evidence",
+    CORSStaticFiles(directory=EVIDENCE_DIR, fallback_directories=[PUBLIC_EVIDENCE_DIR]),
+    name="evidence_storage"
+)
 
 VIDEOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "videos")
+PUBLIC_VIDEOS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "public", "videos")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
-app.mount("/videos", CORSStaticFiles(directory=VIDEOS_DIR), name="video_storage")
+os.makedirs(PUBLIC_VIDEOS_DIR, exist_ok=True)
+app.mount(
+    "/videos",
+    CORSStaticFiles(directory=VIDEOS_DIR, fallback_directories=[PUBLIC_VIDEOS_DIR]),
+    name="video_storage"
+)
 
 FACES_DIR = settings.FACE_STORAGE_DIR
 os.makedirs(FACES_DIR, exist_ok=True)
@@ -396,8 +442,13 @@ for prefix in ["/api/v1", "/api"]:
     app.include_router(training_router, prefix=prefix)
     app.include_router(faces_router, prefix=prefix)
     app.include_router(anpr_router, prefix=prefix)
+    app.include_router(suspicious_router, prefix=prefix)
+    app.include_router(night_movement_router, prefix=prefix)
+    app.include_router(security_events_router, prefix=prefix)
+    app.include_router(c2_router, prefix=prefix)
 
 # Mount WebSocket router
+
 app.include_router(ws_router)
 
 if __name__ == "__main__":

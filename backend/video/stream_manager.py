@@ -86,7 +86,15 @@ class StreamSourceManager:
                     if os.path.isfile(candidate_sub):
                         return os.path.abspath(candidate_sub)
 
-        # 4. Check relative to backend/ directory
+        # 4. Check public/videos/ directory
+        project_root = os.path.dirname(base_dir)
+        public_videos_dir = os.path.join(project_root, "public", "videos")
+        if os.path.isdir(public_videos_dir):
+            candidate_pub = os.path.join(public_videos_dir, filename)
+            if os.path.exists(candidate_pub) and os.path.isfile(candidate_pub):
+                return os.path.abspath(candidate_pub)
+
+        # 5. Check relative to backend/ directory
         rel_candidate = os.path.join(base_dir, source_url)
         if os.path.exists(rel_candidate) and os.path.isfile(rel_candidate):
             return os.path.abspath(rel_candidate)

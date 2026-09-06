@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from database.models import IncidentModel, ZoneModel
 from ai.smart_alert import smart_alert_service
 from ai.threat_engine import threat_engine
-from ai.tracker import track_registry
+from ai.tracker import track_registry, TrackState
 
 logger = logging.getLogger("ibvap.fence")
 
@@ -97,6 +97,8 @@ class VirtualFenceEngine:
         self._entry_timestamps: Dict[str, float] = {}
         # Active zone alert timestamps to handle throttling/cooldown
         self._active_zone_alerts: Dict[str, float] = {}
+        # Maps key f"{camera_id}:{zone_id}:{track_id}" -> IncidentModel.id
+        self._active_incidents: Dict[str, str] = {}
 
     def clear_camera(self, camera_id: str):
         """Reset state for a camera before a new video run."""
@@ -108,6 +110,9 @@ class VirtualFenceEngine:
         alert_keys = [k for k in self._active_zone_alerts if k.startswith(f"{camera_id}:")]
         for k in alert_keys:
             self._active_zone_alerts.pop(k, None)
+        active_inc_keys = [k for k in self._active_incidents if k.startswith(f"{camera_id}:")]
+        for k in active_inc_keys:
+            self._active_incidents.pop(k, None)
 
     def evaluate_frame_detections(
         self,
@@ -121,9 +126,11 @@ class VirtualFenceEngine:
     ) -> List[IncidentModel]:
         """
         Evaluates per-frame ByteTrack detections against all enabled zones for a camera.
-        Validates individual targets (humans, vehicles, animals) via SmartAlert logic.
+        Validates individual targets (humans, animals) via SmartAlert logic.
         - If recognized as a known person, no incident is automatically generated.
         - If recognized as UNKNOWN PERSON DETECTED, creates an incident.
+        - Continuously tracked targets in an active episode update the existing incident
+          instead of generating redundant duplicate incidents.
         """
         from database.models import CameraModel
         created_incidents: List[IncidentModel] = []
@@ -145,11 +152,13 @@ class VirtualFenceEngine:
                 obj_type = det.get("object_type")
                 fine_class = det.get("fine_class")
                 
+                # Strict isolation: Do not create vehicle incidents
+                if obj_type == "vehicle" or fine_class in ("car", "motorcycle", "bus", "truck"):
+                    continue
+
                 # Check zone object type filters
                 is_match = False
                 if zone.human_detection and (obj_type == "human" or fine_class == "person"):
-                    is_match = True
-                elif zone.vehicle_detection and obj_type == "vehicle":
                     is_match = True
                 elif zone.animal_detection and obj_type == "animal":
                     is_match = True
@@ -168,11 +177,27 @@ class VirtualFenceEngine:
                 state_key = f"{camera_id}:{zone.id}:{track_id}"
                 old_state = self._track_zone_states.get(state_key, "OUTSIDE")
 
+                # Check if track was reaped/lost in tracker
+                if track_id is not None:
+                    try:
+                        tid_int = int(track_id)
+                        t_rec = track_registry._get_camera_store(camera_id).get(tid_int)
+                        if t_rec and t_rec.state == TrackState.LOST:
+                            self._active_incidents.pop(state_key, None)
+                            self._track_zone_states[state_key] = "OUTSIDE"
+                            self._entry_timestamps.pop(state_key, None)
+                    except (ValueError, TypeError):
+                        pass
+
                 if is_inside:
                     if obj_type == "human" or fine_class == "person":
                         humans_inside.append(det)
 
                     is_first_entry = (old_state == "OUTSIDE")
+                    if is_first_entry or state_key not in self._entry_timestamps:
+                        self._entry_timestamps[state_key] = timestamp_sec
+
+                    loiter_duration = max(0, int(timestamp_sec - self._entry_timestamps.get(state_key, timestamp_sec)))
 
                     # Resolve frames_seen history from track_registry
                     frames_seen = 1
@@ -184,6 +209,26 @@ class VirtualFenceEngine:
                                 frames_seen = t_rec.frames_seen
                         except (ValueError, TypeError):
                             pass
+
+                    # ── Continuous Episode Deduplication ──
+                    # If an active incident episode already exists for this continuous track in this zone:
+                    active_inc_id = self._active_incidents.get(state_key)
+                    if active_inc_id:
+                        # Update existing active episode where appropriate without creating duplicate rows
+                        try:
+                            existing_inc = db.query(IncidentModel).filter(
+                                (IncidentModel.id == active_inc_id) | (IncidentModel.incident_id == active_inc_id)
+                            ).first()
+                            if existing_inc:
+                                existing_inc.loitering_duration_sec = loiter_duration
+                                if timestamp_sec > 1000000000:
+                                    existing_inc.timestamp = datetime.fromtimestamp(timestamp_sec, timezone.utc)
+                                db.commit()
+                        except Exception as update_err:
+                            logger.debug(f"Error updating active incident {active_inc_id}: {update_err}")
+
+                        self._track_zone_states[state_key] = "INSIDE"
+                        continue
 
                     # The authoritative incident gate determines everything, including identity
                     is_confirmed, checks, reason, person_name, face_recognized, face_confidence = smart_alert_service.validate_candidate_event(
@@ -217,7 +262,7 @@ class VirtualFenceEngine:
                             zone_severity=zone.severity or "high",
                             frames_seen=frames_seen,
                             has_persistent_track=True,
-                            loitering_sec=0.0,
+                            loitering_sec=float(loiter_duration),
                             direction_inward=True,
                             confidence=det.get("confidence", 0.95),
                             ai_reliability=int(det.get("confidence", 0.95) * 100),
@@ -246,7 +291,7 @@ class VirtualFenceEngine:
                             sync_status="unsynced",
                             snapshot_url="",
                             zone_name=zone.name,
-                            loitering_duration_sec=0,
+                            loitering_duration_sec=loiter_duration,
                             speed_kmh=4.2,
                             direction="Inward Perimeter",
                             smart_alert_confirmed=True,
@@ -290,9 +335,12 @@ class VirtualFenceEngine:
 
                         created_incidents.append(db_inc)
                         self._track_zone_states[state_key] = "INSIDE"
+                        self._active_incidents[state_key] = db_inc.id
                         logger.info(f"SMARTALERT CONFIRMED INCIDENT: {inc_id_str} for track {track_id} in zone '{zone.name}'")
                 else:
                     self._track_zone_states[state_key] = "OUTSIDE"
+                    self._entry_timestamps.pop(state_key, None)
+                    self._active_incidents.pop(state_key, None)
 
 
 

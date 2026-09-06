@@ -110,35 +110,35 @@ def test_camera(db):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 1 — Plate Localization
+# Test 1 — Plate Localization & OCR
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_01_plate_localization():
-    """Verify detect_plate_region finds plate candidate in vehicle ROI."""
+    """Verify process_vehicle_crop finds plate and extracts OCR."""
     engine = ANPREngine()
     crop = np.zeros((120, 240, 3), dtype=np.uint8)
     # Draw a plate-like white rectangle in lower region
     cv2.rectangle(crop, (50, 70), (190, 102), (240, 240, 240), -1)
     cv2.putText(crop, "KA01AB1234", (55, 94), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
 
-    res = engine.detect_plate_region(crop)
-    assert res is not None, "Plate region should be detected"
-    plate_crop, (px, py, pw, ph), conf = res
+    mock_reader = MagicMock()
+    mock_reader.readtext.return_value = [([(50, 70), (190, 70), (190, 102), (50, 102)], "KA01AB1234", 0.95)]
+    engine.reader = mock_reader
+    res = engine.process_vehicle_crop(crop)
+        
+    assert res is not None, "Plate should be detected"
+    (px, py, pw, ph), raw_ocr, norm_plate, conf = res
     assert pw > 0 and ph > 0
+    assert norm_plate == "KA01AB1234"
     assert conf >= 0.30
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 2 — Character Segmentation & OCR
+# Test 2 — Character Segmentation & OCR (Merged)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_02_ocr_extraction():
-    """Verify run_ocr returns raw text, normalized text, and confidence."""
-    engine = ANPREngine()
-    with patch.object(engine, "run_ocr", return_value=("KA-01-AB-1234", "KA01AB1234", 0.92)):
-        raw, norm, conf = engine.run_ocr(np.zeros((50, 150, 3), dtype=np.uint8))
-        assert norm == "KA01AB1234"
-        assert conf == 0.92
+    """Verified in test_01."""
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,12 +363,10 @@ def test_15_anpr_zero_incidents(client, test_camera, db):
     car_det = _build_car_det(track_id=15, confidence=0.92)
 
     with patch("api.detections.detector_instance.track_frame") as mock_tf, \
-         patch("ai.anpr_engine.anpr_engine.detect_plate_region") as mock_pr, \
-         patch("ai.anpr_engine.anpr_engine.run_ocr") as mock_ocr:
+         patch("ai.anpr_engine.anpr_engine.process_vehicle_crop") as mock_pvc:
 
         mock_tf.return_value = [car_det]
-        mock_pr.return_value = (np.zeros((30, 90, 3), dtype=np.uint8), (10, 10, 80, 25), 0.90)
-        mock_ocr.return_value = ("KA-01-AB-1234", "KA01AB1234", 0.95)
+        mock_pvc.return_value = ((10, 10, 80, 25), "KA-01-AB-1234", "KA01AB1234", 0.95)
 
         for _ in range(5):
             res = client.post(
@@ -394,12 +392,10 @@ def test_16_anpr_zero_evidence(client, test_camera, db):
     car_det = _build_car_det(track_id=16, confidence=0.90)
 
     with patch("api.detections.detector_instance.track_frame") as mock_tf, \
-         patch("ai.anpr_engine.anpr_engine.detect_plate_region") as mock_pr, \
-         patch("ai.anpr_engine.anpr_engine.run_ocr") as mock_ocr:
+         patch("ai.anpr_engine.anpr_engine.process_vehicle_crop") as mock_pvc:
 
         mock_tf.return_value = [car_det]
-        mock_pr.return_value = (np.zeros((30, 90, 3), dtype=np.uint8), (10, 10, 80, 25), 0.90)
-        mock_ocr.return_value = ("DL-3C-9999", "DL3C9999", 0.92)
+        mock_pvc.return_value = ((10, 10, 80, 25), "DL-3C-9999", "DL3C9999", 0.92)
 
         for _ in range(5):
             res = client.post(
@@ -548,10 +544,10 @@ def test_21_phase1_vehicle_regression(client, test_camera, db):
     car_det = _build_car_det(track_id=21, confidence=0.88)
 
     with patch("api.detections.detector_instance.track_frame") as mock_tf, \
-         patch("ai.anpr_engine.anpr_engine.detect_plate_region") as mock_pr:
+         patch("ai.anpr_engine.anpr_engine.process_vehicle_crop") as mock_pvc:
 
         mock_tf.return_value = [car_det]
-        mock_pr.return_value = None  # No plate found
+        mock_pvc.return_value = None  # No plate found
 
         res = None
         for _ in range(6):

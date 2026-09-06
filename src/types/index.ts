@@ -83,9 +83,57 @@ export interface Incident {
   face_confidence?: number;
   faceConfidence?: number;
   sourceVideoTimestampSec?: number;
+  eventType?: string;
+  trackId?: string;
+}
+
+export interface SuspiciousActivity {
+  id: string;
+  activity_id: string;
+  camera_id: string;
+  track_id: number;
+  track_label: string;
+  activity_type: string;
+  severity: string;
+  started_at: string;
+  detected_at: string;
+  duration_sec: number;
+  zone_name?: string | null;
+  description?: string | null;
+  incident_id?: string | null;
+  created_at: string;
+}
+
+export interface SuspiciousActivityStats {
+  total_suspicious_activities: number;
+  activity_type_breakdown: Record<string, number>;
+  camera_breakdown: Record<string, number>;
+  severity_breakdown: Record<string, number>;
+}
+
+export interface NightMovement {
+  id: string;
+  movement_id: string;
+  camera_id: string;
+  track_id: number;
+  track_label: string;
+  avg_luma: number;
+  dark_pixel_ratio: number;
+  displacement: number;
+  path_length: number;
+  samples_count: number;
+  incident_id?: string | null;
+  detected_at: string;
+  created_at: string;
+}
+
+export interface NightMovementStats {
+  total_night_movements: number;
+  camera_breakdown: Record<string, number>;
 }
 
 export interface Camera {
+
   id: string;
   camera_id?: string;
   name: string;
@@ -352,4 +400,80 @@ export interface ANPRStats {
   valid_format_count: number;
   by_camera: Record<string, number>;
 }
+
+export interface UnifiedSecurityEvent {
+  id: string;
+  event_id: string;
+  camera_id: string;
+  camera_name: string;
+  subject_type: 'human' | 'vehicle';
+  track_id: number;
+  track_label: string;
+  threat_level: Severity;
+  threat_score: number;
+  threat_reason: string;
+  status: 'active' | 'resolved';
+  contributing_signals: string[];
+  related_incident_ids: string[];
+  related_evidence_ids: string[];
+  snapshot_url: string;
+  face_info?: {
+    identity_status: string;
+    person_name?: string;
+    confidence?: number;
+    match_distance?: number;
+  } | null;
+  vehicle_info?: {
+    vehicle_class?: string;
+    plate_text?: string;
+    format_valid?: boolean;
+    confidence?: number;
+    direction?: string;
+  } | null;
+  first_seen: string;
+  last_seen: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SecurityEventStats {
+  total_events: number;
+  active_events: number;
+  resolved_events: number;
+  threat_level_breakdown: Record<string, number>;
+  camera_breakdown: Record<string, number>;
+  contributing_signal_breakdown: Record<string, number>;
+}
+
+export interface C2Status {
+  enabled: boolean;
+  endpoint_configured: boolean;
+  connected: boolean;
+  last_delivery: string | null;
+  delivered_count: number;
+  failed_count: number;
+}
+
+export interface C2DeliveryRecord {
+  id: string;
+  security_event_id: string;
+  event_type: string;
+  status: 'PENDING' | 'SENT' | 'ACKNOWLEDGED' | 'FAILED' | 'SKIPPED';
+  attempt_count: number;
+  last_attempt_at: string | null;
+  acknowledged_at: string | null;
+  response_status: number | null;
+  error_message: string | null;
+  payload?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface C2DeliveryResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  deliveries: C2DeliveryRecord[];
+}
+
 

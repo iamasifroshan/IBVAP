@@ -96,7 +96,8 @@ export const SentinelQueryPage: React.FC = () => {
     'Show high-risk events from Camera 7 yesterday.',
     'Find vehicle intrusions during fog.',
     'Show all critical events from the eastern sector last night.',
-    'Find people near the northern checkpoint after 2 AM.'
+    'Find people near the northern checkpoint after 2 AM.',
+    'Search for license plate MH12DE1433'
   ];
 
   const handleCopyId = (id: string, e: React.MouseEvent) => {
@@ -116,7 +117,52 @@ export const SentinelQueryPage: React.FC = () => {
     try {
       const { filters, results } = await ibvapApi.querySentinelAI(trimmed, incidents);
       setActiveFilters(filters);
-      setMatchedIncidents(results || []);
+      
+      let finalResults = results || [];
+
+      // If it looks like a vehicle or plate query, try fetching ANPR matches
+      const isVehicleOrPlateQuery = 
+        filters.extractedObject?.toLowerCase() === 'vehicle' || 
+        trimmed.toLowerCase().includes('plate') || 
+        trimmed.toLowerCase().includes('license') || 
+        trimmed.toLowerCase().includes('car');
+
+      if (isVehicleOrPlateQuery) {
+        try {
+          // Extract potential plate text (alphanumeric only)
+          const potentialPlate = trimmed.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+          const plateParam = potentialPlate.length >= 4 ? potentialPlate : undefined;
+
+          const anprRecords = await ibvapApi.searchAnprRecords({
+            limit: 20,
+            plate: plateParam,
+            vehicle_class: filters.extractedObject?.toLowerCase() === 'vehicle' ? undefined : undefined
+          });
+
+          // Convert ANPR observations to incident format for display
+          const anprAsIncidents = anprRecords.map(rec => ({
+            id: rec.anpr_id,
+            timestamp: rec.last_seen,
+            objectType: 'vehicle',
+            cameraId: rec.camera_id,
+            cameraName: rec.camera_id,
+            sector: 'Border Control',
+            severity: rec.format_valid ? 'low' : 'medium',
+            threatScore: rec.format_valid ? 10 : 40,
+            status: 'resolved',
+            explainableReason: `ANPR Log: ${rec.plate_text} (Valid Format: ${rec.format_valid ? 'Yes' : 'No'})`,
+            snapshotUrl: '', 
+            isAnpr: true,
+            anprData: rec,
+          } as any));
+
+          finalResults = [...finalResults, ...anprAsIncidents];
+        } catch (e) {
+          console.warn("ANPR Search integration failed:", e);
+        }
+      }
+
+      setMatchedIncidents(finalResults);
     } catch (err) {
       console.error("SentinelQuery API call failed, falling back to local vault:", err);
       const parsed = parseSentinelQuery(trimmed);

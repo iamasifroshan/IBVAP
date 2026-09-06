@@ -165,9 +165,112 @@ def run_migrations():
         if "source_video_timestamp_sec" not in inc_columns:
             cursor.execute("ALTER TABLE incidents ADD COLUMN source_video_timestamp_sec FLOAT DEFAULT NULL")
 
+        # Create suspicious_activities table if it does not exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS suspicious_activities (
+                id TEXT PRIMARY KEY,
+                activity_id TEXT UNIQUE NOT NULL,
+                camera_id TEXT NOT NULL,
+                track_id INTEGER NOT NULL,
+                track_label TEXT NOT NULL,
+                activity_type TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'MEDIUM',
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                duration_sec FLOAT DEFAULT 0.0,
+                zone_name TEXT,
+                description TEXT,
+                incident_id TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_suspicious_activities_activity_id ON suspicious_activities (activity_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_suspicious_activities_camera_id ON suspicious_activities (camera_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_suspicious_activities_track_id ON suspicious_activities (track_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_suspicious_activities_activity_type ON suspicious_activities (activity_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_suspicious_activities_incident_id ON suspicious_activities (incident_id)")
+
+        # Create night_movements table if it does not exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS night_movements (
+                id TEXT PRIMARY KEY,
+                movement_id TEXT UNIQUE NOT NULL,
+                camera_id TEXT NOT NULL,
+                track_id INTEGER NOT NULL,
+                track_label TEXT NOT NULL,
+                avg_luma FLOAT NOT NULL,
+                dark_pixel_ratio FLOAT NOT NULL,
+                displacement FLOAT NOT NULL,
+                path_length FLOAT NOT NULL,
+                samples_count INTEGER NOT NULL DEFAULT 5,
+                incident_id TEXT,
+                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_night_movements_movement_id ON night_movements (movement_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_night_movements_camera_id ON night_movements (camera_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_night_movements_track_id ON night_movements (track_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_night_movements_incident_id ON night_movements (incident_id)")
+
+        # Create security_events table if it does not exist (Unified Intelligence)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS security_events (
+                id TEXT PRIMARY KEY,
+                event_id TEXT UNIQUE NOT NULL,
+                camera_id TEXT NOT NULL,
+                camera_name TEXT DEFAULT 'Camera',
+                subject_type TEXT NOT NULL DEFAULT 'human',
+                track_id INTEGER NOT NULL,
+                track_label TEXT NOT NULL,
+                threat_level TEXT NOT NULL DEFAULT 'low',
+                threat_score INTEGER NOT NULL DEFAULT 20,
+                threat_reason TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                contributing_signals TEXT DEFAULT '[]',
+                related_incident_ids TEXT DEFAULT '[]',
+                related_evidence_ids TEXT DEFAULT '[]',
+                snapshot_url TEXT DEFAULT '',
+                face_info TEXT,
+                vehicle_info TEXT,
+                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_event_id ON security_events (event_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_camera_id ON security_events (camera_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_track_id ON security_events (track_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_threat_level ON security_events (threat_level)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_status ON security_events (status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_security_events_created_at ON security_events (created_at)")
+
+        # Create c2_deliveries table if it does not exist (Command & Control Integration)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS c2_deliveries (
+                id TEXT PRIMARY KEY,
+                security_event_id TEXT NOT NULL,
+                event_type TEXT NOT NULL DEFAULT 'UNIFIED_SECURITY_EVENT',
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                attempt_count INTEGER NOT NULL DEFAULT 1,
+                last_attempt_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                acknowledged_at DATETIME,
+                response_status INTEGER,
+                error_message TEXT,
+                payload TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_c2_deliveries_security_event_id ON c2_deliveries (security_event_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_c2_deliveries_status ON c2_deliveries (status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_c2_deliveries_created_at ON c2_deliveries (created_at)")
+
         conn.commit()
         conn.close()
         print("[DB Migration] SQLite migrations checked/applied successfully.")
+
     except Exception as e:
         print(f"[DB Migration] Migration error: {e}")
 

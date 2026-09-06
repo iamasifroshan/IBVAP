@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { ibvapApi } from '../../services/apiClient';
 import { Camera as CameraType, Incident } from '../../types';
-import type { VehicleStats, ANPRStats } from '../../types';
+import type { VehicleStats, ANPRStats, C2Status } from '../../types';
 import { CameraAnalysisModal } from '../common/CameraAnalysisModal';
 import { BorderOverviewMap } from '../common/BorderOverviewMap';
 import { IncidentDetailModal } from '../common/IncidentDetailModal';
@@ -55,12 +55,15 @@ export const CommandOverviewPage: React.FC = () => {
     incidents,
     cameras,
     setActivePage,
-    knownPersonsCount
+    knownPersonsCount,
+    securityEvents
   } = useApp();
 
   const [activeAnalysisCamera, setActiveAnalysisCamera] = useState<CameraType | null>(null);
   const [selectedIncidentForDetail, setSelectedIncidentForDetail] = useState<Incident | null>(null);
   const [currentTimeIST, setCurrentTimeIST] = useState(formatShortTimeIST(new Date().toISOString()));
+  const [rightPanelTab, setRightPanelTab] = useState<'incidents' | 'security_events'>('security_events');
+  const [secEventFilter, setSecEventFilter] = useState<'ALL' | 'HIGH_CRITICAL' | 'MEDIUM' | 'ACTIVE'>('ALL');
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTimeIST(formatShortTimeIST(new Date().toISOString())), 60000);
@@ -70,6 +73,8 @@ export const CommandOverviewPage: React.FC = () => {
   const [retryKeys, setRetryKeys] = useState<Record<string, number>>({});
   const [vehicleStats, setVehicleStats] = useState<VehicleStats>({ total: 6, car: 3, motorcycle: 1, bus: 1, truck: 1, by_camera: {} });
   const [anprStats, setAnprStats] = useState<ANPRStats>({ total_reads: 0, unique_plates: 0, valid_format_count: 0, by_camera: {} });
+  const [c2Status, setC2Status] = useState<C2Status | null>(null);
+  const [isTestingC2, setIsTestingC2] = useState<boolean>(false);
   const [currentTimeStr, setCurrentTimeStr] = useState<string>('09:58:12 AM');
 
   // Real-time live timestamp clock
@@ -83,16 +88,18 @@ export const CommandOverviewPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Poll vehicle stats and ANPR stats from real backend every 4 seconds
+  // Poll vehicle stats, ANPR stats, and C2 status from real backend every 4 seconds
   useEffect(() => {
     const loadVehicleAndANPRStats = async () => {
       try {
-        const [vStats, aStats] = await Promise.all([
+        const [vStats, aStats, c2] = await Promise.all([
           ibvapApi.getVehicleStats(),
-          ibvapApi.getANPRStats()
+          ibvapApi.getANPRStats(),
+          ibvapApi.getC2Status()
         ]);
         if (vStats && vStats.total > 0) setVehicleStats(vStats);
         if (aStats) setAnprStats(aStats);
+        if (c2) setC2Status(c2);
       } catch {
         // preserve state gracefully
       }
@@ -101,6 +108,19 @@ export const CommandOverviewPage: React.FC = () => {
     const timer = setInterval(loadVehicleAndANPRStats, 4000);
     return () => clearInterval(timer);
   }, []);
+
+  const handleTriggerTestEvent = async () => {
+    setIsTestingC2(true);
+    try {
+      await ibvapApi.triggerC2TestEvent();
+      const st = await ibvapApi.getC2Status();
+      if (st) setC2Status(st);
+    } catch (err) {
+      console.error('C2 test event failed:', err);
+    } finally {
+      setIsTestingC2(false);
+    }
+  };
 
   // Ensure 6 official border camera feeds
   const displayCameras: CameraType[] = cameras.length >= 6
@@ -373,6 +393,80 @@ export const CommandOverviewPage: React.FC = () => {
 
       </div>
 
+      {/* ── C2 INTEGRATION STATUS STRIP ── */}
+      <div className="relative z-10 bg-white rounded-xl border border-slate-200/90 shadow-xs p-3 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
+            c2Status?.enabled && c2Status.connected
+              ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+              : c2Status?.enabled
+              ? 'bg-amber-50 text-amber-600 border-amber-200'
+              : 'bg-slate-100 text-slate-500 border-slate-200'
+          }`}>
+            <Radio className={`w-4 h-4 ${c2Status?.enabled && c2Status.connected ? 'animate-pulse text-emerald-600' : ''}`} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-800 tracking-wide font-mono uppercase text-[12px]">
+                Command & Control (C2) Integration
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase font-mono flex items-center gap-1 ${
+                c2Status?.enabled && c2Status.connected
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  : c2Status?.enabled
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-slate-100 text-slate-600 border border-slate-300'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  c2Status?.enabled && c2Status.connected
+                    ? 'bg-emerald-600 animate-pulse'
+                    : c2Status?.enabled
+                    ? 'bg-amber-500'
+                    : 'bg-slate-400'
+                }`} />
+                {c2Status?.enabled
+                  ? (c2Status.connected ? 'CONNECTED' : 'STANDBY / RETRY')
+                  : 'DISABLED (AUTONOMOUS EDGE MODE)'}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+              <span>Target:</span>
+              <span className="font-mono text-slate-700 font-medium">
+                {c2Status?.enabled && c2Status.endpoint_configured
+                  ? 'Configured External Endpoint'
+                  : 'SIMULATION / C2 NOT CONNECTED'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 text-[11px] font-mono flex-wrap">
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
+            <span className="text-slate-400">Last Dispatched:</span>
+            <span className="font-semibold text-slate-700">
+              {c2Status?.last_delivery ? formatShortTimeIST(c2Status.last_delivery) : 'None'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-emerald-700">
+            <span className="font-bold">Delivered:</span>
+            <span className="font-extrabold">{c2Status?.delivered_count || 0}</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-slate-600">
+            <span className="font-bold">Failed:</span>
+            <span className="font-extrabold">{c2Status?.failed_count || 0}</span>
+          </div>
+          <button
+            onClick={handleTriggerTestEvent}
+            disabled={isTestingC2}
+            className="px-2.5 py-1 rounded-lg font-bold text-[11px] bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            title="Dispatch a simulated test security event to C2 receiver"
+          >
+            <RefreshCw className={`w-3 h-3 ${isTestingC2 ? 'animate-spin' : ''}`} />
+            <span>Test Dispatch</span>
+          </button>
+        </div>
+      </div>
+
       {/* ── ROW 1: LIVE CAMERA FEEDS (full-width, 2-per-row grid) + INCIDENTS ── */}
       <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         
@@ -416,7 +510,7 @@ export const CommandOverviewPage: React.FC = () => {
               const videoSrc = ibvapApi.getVideoUrlForCamera(cam) || (
                 cam.id === 'BORDER-CAM-07' ? '/videos/gettyimages-2215078536-640_adpp.mp4' :
                 cam.id === 'SECTOR-B-CAM-03' ? '/videos/gettyimages-2213890215-640_adpp.mp4' :
-                cam.id === 'BOP-NORTH-02' ? '/videos/12522257-hd_1920_1080_24fps.mp4' :
+                cam.id === 'BOP-NORTH-02' ? '/videos/bop_north_02.mp4' :
                 '/videos/17502678-hd_1080_1920_30fps.mp4'
               );
               const isError = Boolean(videoErrors[cam.id]);
@@ -523,96 +617,255 @@ export const CommandOverviewPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Right Column: Recent Incidents — INTERNALLY SCROLLABLE ── */}
+        {/* ── Right Column: Recent Incidents & Unified Security Events — INTERNALLY SCROLLABLE ── */}
         <div className="xl:col-span-4 bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden flex flex-col h-[530px]">
           
-          {/* Fixed Header */}
-          <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-300">
-                <ShieldAlert className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-[#0F2742] tracking-tight">RECENT INCIDENTS</h2>
-                <p className="text-[11px] text-slate-500 font-medium">({sortedIncidents.length} Records)</p>
-              </div>
+          {/* Fixed Header with Switcher Tabs */}
+          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setRightPanelTab('security_events')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  rightPanelTab === 'security_events'
+                    ? 'bg-[#0F2742] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>SECURITY EVENTS</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  rightPanelTab === 'security_events' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {securityEvents.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setRightPanelTab('incidents')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  rightPanelTab === 'incidents'
+                    ? 'bg-[#0F2742] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+                <span>INCIDENTS</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  rightPanelTab === 'incidents' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {sortedIncidents.length}
+                </span>
+              </button>
             </div>
 
             <button
-              onClick={() => setActivePage('incidents')}
-              className="inline-flex items-center gap-1 text-xs font-bold text-sky-700 hover:text-sky-900 transition-colors"
+              onClick={() => setActivePage(rightPanelTab === 'security_events' ? 'sentinel-query' : 'incidents')}
+              className="inline-flex items-center gap-1 text-xs font-bold text-sky-700 hover:text-sky-900 transition-colors shrink-0"
             >
               <span>View All</span>
               <span className="text-sm">→</span>
             </button>
           </div>
 
-          {/* Internally Scrollable Incident List */}
+          {/* Sub-filter Bar for Security Events */}
+          {rightPanelTab === 'security_events' && (
+            <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px] font-semibold">
+              <button
+                onClick={() => setSecEventFilter('ALL')}
+                className={`px-2 py-0.5 rounded ${secEventFilter === 'ALL' ? 'bg-[#1F5F8B] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                ALL ({securityEvents.length})
+              </button>
+              <button
+                onClick={() => setSecEventFilter('HIGH_CRITICAL')}
+                className={`px-2 py-0.5 rounded ${secEventFilter === 'HIGH_CRITICAL' ? 'bg-[#D92D20] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                HIGH / CRIT ({securityEvents.filter(e => e.threat_level === 'high' || e.threat_level === 'critical').length})
+              </button>
+              <button
+                onClick={() => setSecEventFilter('MEDIUM')}
+                className={`px-2 py-0.5 rounded ${secEventFilter === 'MEDIUM' ? 'bg-[#F59E0B] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                MED ({securityEvents.filter(e => e.threat_level === 'medium').length})
+              </button>
+              <button
+                onClick={() => setSecEventFilter('ACTIVE')}
+                className={`px-2 py-0.5 rounded ${secEventFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
+              >
+                ACTIVE ({securityEvents.filter(e => e.status === 'active').length})
+              </button>
+            </div>
+          )}
+
+          {/* Internally Scrollable Incident or Security Event List */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {sortedIncidents.map((inc, i) => {
-              const sev = (inc.severity || 'high').toLowerCase();
-              const isCritical = sev === 'critical';
-              const isHigh = sev === 'high' || isCritical;
-              const isMed = sev === 'medium';
-              
-              const trackIdStr = `TRK-${(inc.id || (1000 + i)).toString().replace(/\D/g, '').slice(-4) || '9821'}`;
-              const eventTitle = inc.explainableReason 
-                ? (inc.explainableReason.includes('—') ? inc.explainableReason.split('—')[1].trim() : inc.explainableReason)
-                : (inc as any).eventType || 'Person Detected';
+            {rightPanelTab === 'security_events' ? (
+              (() => {
+                const filtered = securityEvents.filter(ev => {
+                  if (secEventFilter === 'HIGH_CRITICAL') return ev.threat_level === 'high' || ev.threat_level === 'critical';
+                  if (secEventFilter === 'MEDIUM') return ev.threat_level === 'medium';
+                  if (secEventFilter === 'ACTIVE') return ev.status === 'active';
+                  return true;
+                });
 
-              return (
-                <div
-                  key={inc.id || i}
-                  onClick={() => setSelectedIncidentForDetail(inc)}
-                  className="p-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50/90 shadow-xs hover:shadow-sm transition-all duration-150 flex items-center justify-between gap-3 cursor-pointer group"
-                >
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    {/* Severity Badge */}
-                    <div className="pt-0.5 shrink-0">
-                      <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
-                        isCritical 
-                          ? 'bg-red-100 text-red-700 border border-red-200' 
-                          : isHigh 
-                            ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                            : isMed 
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                              : 'bg-sky-50 text-sky-700 border border-sky-200'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          isCritical ? 'bg-red-600 animate-pulse' : isHigh ? 'bg-amber-600' : isMed ? 'bg-amber-500' : 'bg-sky-500'
-                        }`} />
-                        {isCritical ? 'CRIT' : isHigh ? 'HIGH' : isMed ? 'MED' : 'LOW'}
+                if (filtered.length === 0) {
+                  return (
+                    <div className="text-center py-10 font-mono text-xs text-slate-400">
+                      No security events matched the current filter.
+                    </div>
+                  );
+                }
+
+                return filtered.map((ev, i) => {
+                  const isCrit = ev.threat_level === 'critical';
+                  const isHigh = ev.threat_level === 'high' || isCrit;
+                  const isMed = ev.threat_level === 'medium';
+
+                  return (
+                    <div
+                      key={ev.event_id || ev.id || i}
+                      onClick={() => {
+                        // Click workflow: find matching incident or navigate to sentinel query
+                        if (ev.related_incident_ids && ev.related_incident_ids.length > 0) {
+                          const matchedInc = incidents.find(inc => ev.related_incident_ids.includes(inc.id));
+                          if (matchedInc) {
+                            setSelectedIncidentForDetail(matchedInc);
+                            return;
+                          }
+                        }
+                        setActivePage('sentinel-query');
+                      }}
+                      className="p-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 shadow-xs hover:shadow-sm transition-all flex flex-col gap-1.5 cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
+                            isCrit
+                              ? 'bg-red-100 text-red-700 border border-red-200'
+                              : isHigh
+                              ? 'bg-red-50 text-red-600 border border-red-200'
+                              : isMed
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              isCrit ? 'bg-red-600 animate-pulse' : isHigh ? 'bg-red-500' : isMed ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`} />
+                            {ev.threat_level?.toUpperCase()}
+                          </span>
+                          <span className="font-mono font-bold text-xs text-slate-900 truncate">
+                            {ev.track_label || `TRK#${ev.track_id}`}
+                          </span>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                            ev.face_info?.person_name
+                              ? 'bg-blue-100 text-blue-700'
+                              : ev.threat_reason?.includes('Unknown')
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {ev.face_info?.person_name
+                              ? ev.face_info.person_name
+                              : ev.threat_reason?.includes('Unknown')
+                              ? 'UNKNOWN'
+                              : (ev.subject_type === 'vehicle' ? (ev.vehicle_info?.vehicle_class || 'VEHICLE') : 'HUMAN')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1 shrink-0 text-[10px] font-mono font-semibold text-slate-500">
+                          <span>{formatShortTimeIST(ev.last_seen || ev.created_at)}</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-700 transition-colors" />
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-slate-600 font-medium line-clamp-2">
+                        {ev.threat_reason}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] font-mono">
+                        <span className="text-slate-400">{ev.camera_name || ev.camera_id}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                            c2Status?.enabled && c2Status.connected
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : c2Status?.enabled
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-slate-100 text-slate-500 border border-slate-200'
+                          }`}>
+                            {c2Status?.enabled ? (c2Status.connected ? 'C2: ACK' : 'C2: PENDING') : 'C2: NOT DISPATCHED'}
+                          </span>
+                          <span className="capitalize text-slate-400">{ev.status || 'active'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()
+            ) : (
+              sortedIncidents.map((inc, i) => {
+                const sev = (inc.severity || 'high').toLowerCase();
+                const isCritical = sev === 'critical';
+                const isHigh = sev === 'high' || isCritical;
+                const isMed = sev === 'medium';
+                
+                const trackIdStr = `TRK-${(inc.id || (1000 + i)).toString().replace(/\D/g, '').slice(-4) || '9821'}`;
+                const eventTitle = inc.explainableReason 
+                  ? (inc.explainableReason.includes('—') ? inc.explainableReason.split('—')[1].trim() : inc.explainableReason)
+                  : (inc as any).eventType || 'Person Detected';
+
+                return (
+                  <div
+                    key={inc.id || i}
+                    onClick={() => setSelectedIncidentForDetail(inc)}
+                    className="p-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50/90 shadow-xs hover:shadow-sm transition-all duration-150 flex items-center justify-between gap-3 cursor-pointer group"
+                  >
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      {/* Severity Badge */}
+                      <div className="pt-0.5 shrink-0">
+                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
+                          isCritical 
+                            ? 'bg-red-100 text-red-700 border border-red-200' 
+                            : isHigh 
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                              : isMed 
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200' 
+                                : 'bg-sky-50 text-sky-700 border border-sky-200'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            isCritical ? 'bg-red-600 animate-pulse' : isHigh ? 'bg-amber-600' : isMed ? 'bg-amber-500' : 'bg-sky-500'
+                          }`} />
+                          {isCritical ? 'CRIT' : isHigh ? 'HIGH' : isMed ? 'MED' : 'LOW'}
+                        </span>
+                      </div>
+
+                      {/* Incident Details */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-900 truncate">
+                            {eventTitle}
+                          </span>
+                          <span className="text-[10px] font-mono font-medium text-slate-400 shrink-0">
+                            #{trackIdStr}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                          <span className="font-semibold text-slate-700">{inc.cameraName}</span> • <span>{inc.sector || 'Sector B'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Timestamp & Arrow */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] font-mono font-semibold text-slate-500">
+                        {formatShortTimeIST(inc.timestamp)}
                       </span>
-                    </div>
-
-                    {/* Incident Details */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-900 truncate">
-                          {eventTitle}
-                        </span>
-                        <span className="text-[10px] font-mono font-medium text-slate-400 shrink-0">
-                          #{trackIdStr}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                        <span className="font-semibold text-slate-700">{inc.cameraName}</span> • <span>{inc.sector || 'Sector B'}</span>
+                      <div className="text-slate-400 group-hover:text-sky-700 transition-colors">
+                        <ChevronRight className="w-4 h-4" />
                       </div>
                     </div>
                   </div>
-
-                  {/* Timestamp & Arrow */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] font-mono font-semibold text-slate-500">
-                      {formatShortTimeIST(inc.timestamp)}
-                    </span>
-                    <div className="text-slate-400 group-hover:text-sky-700 transition-colors">
-                      <ChevronRight className="w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 

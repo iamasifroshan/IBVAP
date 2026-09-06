@@ -94,6 +94,7 @@ class TrackRecord:
     plate_confidence: float = 0.0
     format_valid: bool = False
     plate_stable: bool = False
+    last_ocr_frame: int = 0
     ocr_history: List[Tuple[str, float]] = field(default_factory=list)
 
     def update(
@@ -545,6 +546,45 @@ class TrackRegistry:
             "truck": by_class["truck"],
             "by_camera": by_camera,
         }
+
+    def prune_stale_tracks(self, camera_id: str, max_age_seconds: float = 30.0, max_capacity: int = 100):
+        """
+        Prunes tracks in LOST state that have not been seen for max_age_seconds,
+        or when the store exceeds max_capacity. Prevents memory leak in long-running surveillance.
+        """
+        now = time.time()
+        # Prune human store
+        store = self._get_camera_store(camera_id)
+        to_prune_human = [
+            tid for tid, rec in store.items()
+            if rec.state == TrackState.LOST and (now - rec.timestamp_last) >= max_age_seconds
+        ]
+        for tid in to_prune_human:
+            store.pop(tid, None)
+        if len(store) > max_capacity:
+            overflow = sorted(
+                [r for r in store.values() if r.state == TrackState.LOST],
+                key=lambda r: r.timestamp_last
+            )
+            for r in overflow[:len(store) - max_capacity]:
+                store.pop(r.track_id, None)
+
+        # Prune vehicle store
+        vstore = self._get_vehicle_camera_store(camera_id)
+        to_prune_vehicle = [
+            tid for tid, rec in vstore.items()
+            if rec.state == TrackState.LOST and (now - rec.timestamp_last) >= max_age_seconds
+        ]
+        for tid in to_prune_vehicle:
+            vstore.pop(tid, None)
+        if len(vstore) > max_capacity:
+            overflow_v = sorted(
+                [r for r in vstore.values() if r.state == TrackState.LOST],
+                key=lambda r: r.timestamp_last
+            )
+            for r in overflow_v[:len(vstore) - max_capacity]:
+                vstore.pop(r.track_id, None)
+
 
 
 # Global singleton track registry

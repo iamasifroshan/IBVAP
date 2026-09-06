@@ -17,8 +17,12 @@ from database.schemas import DetectionResponse, TrackResponse
 from ai.detector import detector_instance
 from ai.tracker import track_registry
 from ai.fence import fence_engine
+from ai.suspicious_engine import suspicious_engine
+from ai.night_movement_engine import night_movement_engine
+from ai.security_intelligence import security_intelligence_engine
 
 router = APIRouter(tags=["AI Detections & Tracking"])
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,6 +209,9 @@ def run_yolo_detection_with_tracking(
         zones = db.query(ZoneModel).all()
 
     fence_engine.clear_camera(cam.camera_id)
+    suspicious_engine.clear_camera(cam.camera_id)
+    night_movement_engine.reset(cam.camera_id)
+    security_intelligence_engine.reset_camera(cam.camera_id)
 
     frames_dict = {}
     for det in results["detections"]:
@@ -214,6 +221,8 @@ def run_yolo_detection_with_tracking(
         frames_dict[f_idx].append(det)
 
     all_created_incidents = []
+    all_suspicious_activities = []
+    all_night_movements = []
     for f_idx in sorted(frames_dict.keys()):
         frame_dets = frames_dict[f_idx]
         ts_sec = frame_dets[0]["timestamp_sec"] if frame_dets else 0.0
@@ -227,6 +236,105 @@ def run_yolo_detection_with_tracking(
             video_path=video_path
         )
         all_created_incidents.extend(incidents_created)
+
+        # Suspicious Activity Evaluation: human tracks only
+        human_frame_dets = [
+            d for d in frame_dets
+            if (d.get("object_type") == "human" or d.get("fine_class") == "person")
+            and not str(d.get("track_label", "")).startswith("VTRK")
+        ]
+        if human_frame_dets:
+            for hd in human_frame_dets:
+                tid = hd.get("track_id")
+                if tid is not None:
+                    try:
+                        tid_int = int(str(tid).replace("TRK#", "").replace("TRACK-", "").replace("TRACK-00", ""))
+                        security_intelligence_engine.ingest_human_frame_signals(
+                            camera_id=cam.camera_id,
+                            track_id=tid_int,
+                            confidence=hd.get("confidence", 0.9),
+                            bounding_box=hd.get("bounding_box", {}),
+                            face_info=hd.get("face"),
+                            zone_name=zones[0].name if zones else None,
+                            timestamp_sec=ts_sec,
+                            db=db,
+                            camera_name=cam.name
+                        )
+                    except Exception:
+                        pass
+
+            susp_acts = suspicious_engine.process_frame(
+                camera_id=cam.camera_id,
+                human_tracks=human_frame_dets,
+                zones=zones,
+                timestamp_sec=ts_sec,
+                db=db,
+                video_path=video_path,
+                frame_index=f_idx,
+            )
+            all_suspicious_activities.extend(susp_acts)
+            if suspicious_engine.last_created_incidents:
+                all_created_incidents.extend(suspicious_engine.last_created_incidents)
+
+            # Night-Time Movement Evaluation: human tracks only
+            nm_acts = night_movement_engine.process_frame(
+                camera_id=cam.camera_id,
+                human_tracks=human_frame_dets,
+                timestamp_sec=ts_sec,
+                db=db,
+                video_path=video_path,
+                frame_index=f_idx,
+            )
+            all_night_movements.extend(nm_acts)
+            if night_movement_engine.last_created_incidents:
+                all_created_incidents.extend(night_movement_engine.last_created_incidents)
+
+            # Correlate incidents to unified intelligence
+            for inc in incidents_created:
+                try:
+                    t_int = int(str(inc.track_id).replace("TRK#", "").replace("TRACK-", "").replace("TRACK-00", ""))
+                    security_intelligence_engine.attach_incident(
+                        camera_id=cam.camera_id,
+                        track_id=t_int,
+                        incident_id=inc.incident_id,
+                        event_type=inc.event_type,
+                        snapshot_url=inc.snapshot_url,
+                        db=db
+                    )
+                except Exception:
+                    pass
+
+            for act in susp_acts:
+                try:
+                    t_int = int(act.get("track_id"))
+                    security_intelligence_engine.attach_suspicious_activity(
+                        camera_id=cam.camera_id,
+                        track_id=t_int,
+                        activity_type=act.get("activity_type", "LOITERING"),
+                        severity=act.get("severity", "MEDIUM"),
+                        description=act.get("description", ""),
+                        incident_id=act.get("incident_id"),
+                        db=db
+                    )
+                except Exception:
+                    pass
+
+            for nm in nm_acts:
+                try:
+                    t_int = int(nm.get("track_id"))
+                    security_intelligence_engine.attach_night_movement(
+                        camera_id=cam.camera_id,
+                        track_id=t_int,
+                        avg_luma=nm.get("avg_luma", 0.0),
+                        dark_pixel_ratio=nm.get("dark_pixel_ratio", 0.0),
+                        displacement=nm.get("displacement", 0.0),
+                        path_length=nm.get("path_length", 0.0),
+                        incident_id=nm.get("incident_id"),
+                        db=db
+                    )
+                except Exception:
+                    pass
+
 
     db.commit()
 
@@ -265,10 +373,15 @@ def run_yolo_detection_with_tracking(
         "saved_tracks_to_db": len(track_records),
         "incidents_created_count": len(all_created_incidents),
         "incidents_created": incidents_serialized,
+        "suspicious_activities": all_suspicious_activities,
+        "night_movements": all_night_movements,
+        "security_events": security_intelligence_engine.get_active_events(cam.camera_id),
         "track_counts": results["track_counts"],
+
         "detections": results["detections"],
         "tracks": results["tracks"],
     }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,6 +523,7 @@ async def detect_single_frame(
     camera_id: str,
     file: UploadFile = File(...),
     conf_threshold: float = Query(0.35, ge=0.0, le=1.0),
+    timestamp_sec: Optional[float] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -447,7 +561,7 @@ async def detect_single_frame(
     
     counter = _webcam_frame_counters.get(camera_id, 0)
     _webcam_frame_counters[camera_id] = counter + 1
-    current_ts = datetime.now(timezone.utc).timestamp()
+    current_ts = timestamp_sec if timestamp_sec is not None else datetime.now(timezone.utc).timestamp()
 
     # Check if there are any persons detected before running heavy Face Recognition
     has_person = any(d.get("fine_class") == "person" or d.get("object_type") == "human" for d in raw_detections)
@@ -610,6 +724,102 @@ async def detect_single_frame(
             zones=zones,
             db=db
         )
+
+    # ── Suspicious Activity Evaluation: human tracks only ────────────────────
+    suspicious_activities = []
+    if person_dets:
+        suspicious_activities = suspicious_engine.process_frame(
+            camera_id=cam.camera_id,
+            human_tracks=person_dets,
+            zones=zones,
+            timestamp_sec=current_ts,
+            db=db,
+            frame_image=frame,
+            frame_index=counter
+        )
+        if suspicious_engine.last_created_incidents:
+            created_incidents.extend(suspicious_engine.last_created_incidents)
+
+    # ── Night-Time Movement Evaluation: human tracks only ────────────────────
+    night_movements = []
+    if person_dets:
+        night_movements = night_movement_engine.process_frame(
+            camera_id=cam.camera_id,
+            human_tracks=person_dets,
+            timestamp_sec=current_ts,
+            db=db,
+            frame_image=frame,
+            frame_index=counter
+        )
+        if night_movement_engine.last_created_incidents:
+            created_incidents.extend(night_movement_engine.last_created_incidents)
+
+    # ── Unified Security Intelligence: Human Correlation ──────────────────────
+    if person_dets:
+        for pd in person_dets:
+            tid = pd.get("track_id")
+            if tid is not None:
+                try:
+                    security_intelligence_engine.ingest_human_frame_signals(
+                        camera_id=cam.camera_id,
+                        track_id=int(tid),
+                        confidence=pd.get("confidence", 0.9),
+                        bounding_box=pd.get("bounding_box", {}),
+                        face_info=pd.get("face"),
+                        zone_name=zones[0].name if zones else None,
+                        timestamp_sec=current_ts,
+                        db=db,
+                        camera_name=cam.name,
+                    )
+                except Exception as err:
+                    logger.warning(f"Error ingesting human signals for unified event: {err}")
+
+        for inc in created_incidents:
+            try:
+                t_raw = inc.track_id
+                t_int = int(str(t_raw).replace("TRK#", "").replace("TRACK-", "").replace("TRACK-00", ""))
+                security_intelligence_engine.attach_incident(
+                    camera_id=cam.camera_id,
+                    track_id=t_int,
+                    incident_id=inc.incident_id,
+                    event_type=inc.event_type,
+                    snapshot_url=inc.snapshot_url,
+                    db=db,
+                )
+            except Exception:
+                pass
+
+        for act in suspicious_activities:
+            try:
+                t_int = int(act.get("track_id"))
+                security_intelligence_engine.attach_suspicious_activity(
+                    camera_id=cam.camera_id,
+                    track_id=t_int,
+                    activity_type=act.get("activity_type", "LOITERING"),
+                    severity=act.get("severity", "MEDIUM"),
+                    description=act.get("description", ""),
+                    incident_id=act.get("incident_id"),
+                    db=db,
+                )
+            except Exception:
+                pass
+
+        for nm in night_movements:
+            try:
+                t_int = int(nm.get("track_id"))
+                security_intelligence_engine.attach_night_movement(
+                    camera_id=cam.camera_id,
+                    track_id=t_int,
+                    avg_luma=nm.get("avg_luma", 0.0),
+                    dark_pixel_ratio=nm.get("dark_pixel_ratio", 0.0),
+                    displacement=nm.get("displacement", 0.0),
+                    path_length=nm.get("path_length", 0.0),
+                    incident_id=nm.get("incident_id"),
+                    db=db,
+                )
+            except Exception:
+                pass
+
         
     # ── Vehicle Detection Pipeline ─────────────────────────────────────────────
     # Route vehicle classes through a completely separate pipeline.
@@ -667,15 +877,19 @@ async def detect_single_frame(
                         vx2 = min(w, vx1 + vw_p)
                         vy2 = min(h, vy1 + vh_p)
 
-                        v_crop = frame[vy1:vy2, vx1:vx2]
-                        if v_crop.size > 0:
-                            p_res = anpr_engine.detect_plate_region(v_crop)
-                            if p_res:
-                                p_crop, (px_rel, py_rel, pw_rel, ph_rel), p_score = p_res
-                                raw_ocr, norm_plate, ocr_conf = anpr_engine.run_ocr(p_crop)
-                                if norm_plate and ocr_conf >= _s.OCR_CONFIDENCE_THRESHOLD:
-                                    is_valid_fmt = anpr_engine.validate_indian_plate_format(norm_plate)
-                                    v_rec.update_vehicle_plate(raw_ocr, norm_plate, ocr_conf, is_valid_fmt)
+                        # OCR Sampling: Reduce CPU load by skipping frames
+                        # Check if plate is already perfectly stable, then we can sample much less frequently (e.g. 5x stride)
+                        sample_rate = _s.OCR_SAMPLE_STRIDE * 5 if v_rec.plate_stable else _s.OCR_SAMPLE_STRIDE
+                        if (counter - getattr(v_rec, "last_ocr_frame", 0)) >= sample_rate:
+                            v_rec.last_ocr_frame = counter
+                            v_crop = frame[vy1:vy2, vx1:vx2]
+                            if v_crop.size > 0:
+                                plate_info = anpr_engine.process_vehicle_crop(v_crop)
+                                if plate_info:
+                                    (px_rel, py_rel, pw_rel, ph_rel), raw_ocr, norm_plate, ocr_conf = plate_info
+                                    if norm_plate and ocr_conf >= _s.OCR_CONFIDENCE_THRESHOLD:
+                                        is_valid_fmt = anpr_engine.validate_indian_plate_format(norm_plate)
+                                        v_rec.update_vehicle_plate(raw_ocr, norm_plate, ocr_conf, is_valid_fmt)
                     except Exception as anpr_err:
                         logger.error(f"[ANPR] Plate processing failed for VTRK#{tid_v}: {anpr_err}")
 
@@ -759,6 +973,35 @@ async def detect_single_frame(
 
     track_registry.mark_vehicle_lost(camera_id, active_vehicle_ids_this_frame)
 
+    # ── Unified Security Intelligence: Vehicle Correlation & Stale Reaping ───
+    for vd in vehicle_dets_out:
+        tid_v = vd.get("track_id")
+        if tid_v is not None:
+            try:
+                security_intelligence_engine.ingest_vehicle_signals(
+                    camera_id=cam.camera_id,
+                    track_id=int(tid_v),
+                    vehicle_class=vd.get("vehicle_class", "car"),
+                    plate_text=vd.get("plate_text"),
+                    plate_confidence=vd.get("plate_confidence", 0.0),
+                    format_valid=vd.get("format_valid", False),
+                    direction=vd.get("direction", "unknown"),
+                    timestamp_sec=current_ts,
+                    db=db,
+                    camera_name=cam.name,
+                )
+            except Exception as v_err:
+                logger.warning(f"Error ingesting vehicle signals for unified event: {v_err}")
+
+    # Reaping stale events for lost tracks
+    security_intelligence_engine.reap_stale_events(
+        camera_id=cam.camera_id,
+        active_human_track_ids=active_ids_this_frame,
+        active_vehicle_track_ids=active_vehicle_ids_this_frame,
+        db=db,
+    )
+    track_registry.prune_stale_tracks(cam.camera_id)
+
     # Broadcast WebSocket event ONLY when vehicle count changes (not every frame)
     _prev_v_count = getattr(detect_single_frame, "_prev_vehicle_counts", {})
     prev_count = _prev_v_count.get(camera_id, -1)
@@ -776,15 +1019,27 @@ async def detect_single_frame(
             except Exception:
                 pass
 
+    active_sec_events = []
+    for pd in person_dets:
+        tid = pd.get("track_id")
+        if tid is not None:
+            ev = security_intelligence_engine.get_subject_context(cam.camera_id, int(tid))
+            if ev and ev not in active_sec_events:
+                active_sec_events.append(ev)
+
     return {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "person_count": len(person_dets),
         "detections": person_dets,
         "vehicle_count": len(vehicle_dets_out),
         "vehicle_detections": vehicle_dets_out,
+        "suspicious_activities": suspicious_activities,
+        "night_movements": night_movements,
+        "security_events": active_sec_events,
         "incidents_created_count": len(created_incidents),
         "incident_ids": [i.incident_id for i in created_incidents],
     }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

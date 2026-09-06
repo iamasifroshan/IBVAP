@@ -13,25 +13,66 @@ import {
   TrendingUp,
   AlertTriangle,
   Radio,
-  Layers
+  Layers,
+  Zap
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ibvapApi, AnalyticsSummary } from '../../services/apiClient';
+import { ANPRStats, SuspiciousActivity, SuspiciousActivityStats, NightMovement, NightMovementStats, SecurityEventStats } from '../../types';
 
 export const AnalyticsPage: React.FC = () => {
   const { cameras, incidents } = useApp();
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [anprStats, setAnprStats] = useState<ANPRStats | null>(null);
+  const [suspStats, setSuspStats] = useState<SuspiciousActivityStats | null>(null);
+  const [recentSuspicious, setRecentSuspicious] = useState<SuspiciousActivity[]>([]);
+  const [nightStats, setNightStats] = useState<NightMovementStats | null>(null);
+  const [recentNightMoves, setRecentNightMoves] = useState<NightMovement[]>([]);
+  const [secStats, setSecStats] = useState<SecurityEventStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState<{ time: string; count: number; x: number; y: number } | null>(null);
 
   const loadAnalytics = async () => {
     setLoading(true);
     try {
-      const res = await ibvapApi.getAnalyticsSummary();
+      const [res, anprRes, suspRes, suspListRes, nmRes, nmListRes, secRes] = await Promise.all([
+        ibvapApi.getAnalyticsSummary(),
+        ibvapApi.getAnprStats().catch((e) => {
+          console.warn("ANPR stats failed:", e);
+          return null;
+        }),
+        ibvapApi.getSuspiciousActivityStats().catch((e) => {
+          console.warn("Suspicious stats failed:", e);
+          return null;
+        }),
+        ibvapApi.getSuspiciousActivities({ limit: 10 }).catch((e) => {
+          console.warn("Suspicious activities failed:", e);
+          return [];
+        }),
+        ibvapApi.getNightMovementStats().catch((e) => {
+          console.warn("Night movement stats failed:", e);
+          return null;
+        }),
+        ibvapApi.getNightMovements({ limit: 10 }).catch((e) => {
+          console.warn("Night movements failed:", e);
+          return [];
+        }),
+        ibvapApi.getSecurityEventStats().catch((e) => {
+          console.warn("Security event stats failed:", e);
+          return null;
+        })
+      ]);
       setSummary(res);
+      setAnprStats(anprRes);
+      setSuspStats(suspRes);
+      setRecentSuspicious(suspListRes || []);
+      setNightStats(nmRes);
+      setRecentNightMoves(nmListRes || []);
+      setSecStats(secRes);
     } catch (err) {
       console.warn("Could not fetch analytics summary, using local context state:", err);
     } finally {
+
       setLoading(false);
     }
   };
@@ -316,6 +357,29 @@ export const AnalyticsPage: React.FC = () => {
               <div className="text-xl font-bold text-emerald-600">{metrics.activeCams} / {metrics.totalCams}</div>
             </div>
           </div>
+          
+          {/* ANPR Reads */}
+          {anprStats && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center gap-3 col-span-2 sm:col-span-2 lg:col-span-4 mt-2">
+              <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-700 shrink-0 shadow-2xs">
+                <Car className="w-4 h-4 text-[#1F5F8B]" />
+              </div>
+              <div className="flex gap-8">
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500">Total ANPR Reads</div>
+                  <div className="text-xl font-bold text-[#0F2742]">{anprStats.total_reads}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500">Unique Plates</div>
+                  <div className="text-xl font-bold text-[#0F2742]">{anprStats.unique_plates}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-500">Valid Indian Format</div>
+                  <div className="text-xl font-bold text-emerald-600">{anprStats.valid_format_count}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -580,6 +644,295 @@ export const AnalyticsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* ── 6. SUSPICIOUS ACTIVITY ANALYTICS ── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-amber-600" />
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Suspicious Activity Detection
+            </h2>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 font-mono">
+            {suspStats?.total_suspicious_activities ?? 0} TOTAL DETECTED
+          </span>
+        </div>
+
+        {/* Behavior Type Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { key: 'UNUSUAL_STOP', label: 'Unusual Stop', desc: 'Stationary >=30s (movement <=0.03)', color: 'text-amber-600', bg: 'bg-amber-50/60', border: 'border-amber-200/70' },
+            { key: 'LOITERING', label: 'Loitering', desc: 'Net disp <=0.12, path >=0.10 for >=30s', color: 'text-orange-600', bg: 'bg-orange-50/60', border: 'border-orange-200/70' },
+            { key: 'RAPID_MOVEMENT', label: 'Rapid Movement', desc: 'Speed >=0.35 across >=5 samples', color: 'text-red-600', bg: 'bg-red-50/60', border: 'border-red-200/70' },
+            { key: 'RESTRICTED_ZONE_BEHAVIOR', label: 'Restricted Zone', desc: 'Lingering inside zone >=10s', color: 'text-purple-600', bg: 'bg-purple-50/60', border: 'border-purple-200/70' },
+          ].map(item => {
+            const count = suspStats?.activity_type_breakdown?.[item.key] ?? 0;
+            return (
+              <div key={item.key} className={`${item.bg} border ${item.border} rounded-lg p-3 flex flex-col justify-between`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-bold text-slate-800">{item.label}</span>
+                  <span className={`text-lg font-bold font-mono ${item.color}`}>{count}</span>
+                </div>
+                <p className="text-[10px] text-slate-500">{item.desc}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Breakdown by Severity and Camera */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+          {/* Severity Breakdown */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Severity Breakdown</h3>
+            <div className="flex items-center gap-4 text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                <span className="text-slate-600">MEDIUM:</span>
+                <span className="font-bold text-slate-900">{suspStats?.severity_breakdown?.['MEDIUM'] ?? 0}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                <span className="text-slate-600">HIGH:</span>
+                <span className="font-bold text-slate-900">{suspStats?.severity_breakdown?.['HIGH'] ?? 0}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Camera Breakdown */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Camera Distribution</h3>
+            {suspStats && Object.keys(suspStats.camera_breakdown || {}).length > 0 ? (
+              <div className="flex flex-wrap gap-2 text-xs font-mono">
+                {Object.entries(suspStats.camera_breakdown).map(([camId, cnt]) => (
+                  <span key={camId} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700">
+                    {camId}: <strong>{cnt}</strong>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400">No camera activity recorded</span>
+            )}
+          </div>
+        </div>
+
+        {/* Recent Suspicious Activities Table */}
+        {recentSuspicious.length > 0 && (
+          <div className="pt-2">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Recent Episodes</h3>
+            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <tr>
+                    <th className="p-2">Track</th>
+                    <th className="p-2">Behavior</th>
+                    <th className="p-2">Severity</th>
+                    <th className="p-2">Duration</th>
+                    <th className="p-2">Camera</th>
+                    <th className="p-2">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {recentSuspicious.map((act) => (
+                    <tr key={act.id} className="hover:bg-slate-50">
+                      <td className="p-2 font-bold text-slate-800">{act.track_label}</td>
+                      <td className="p-2 text-amber-700 font-semibold">{act.activity_type.replace(/_/g, ' ')}</td>
+                      <td className="p-2">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          act.severity === 'HIGH' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {act.severity}
+                        </span>
+                      </td>
+                      <td className="p-2 text-slate-600">{act.duration_sec}s</td>
+                      <td className="p-2 text-slate-600">{act.camera_id}</td>
+                      <td className="p-2 text-slate-500 max-w-xs truncate" title={act.description || ''}>
+                        {act.description || '--'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 7. NIGHT-TIME MOVEMENT ANALYTICS ── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-sky-600" />
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Night-Time Movement Detection
+            </h2>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200 font-mono">
+            {nightStats?.total_night_movements ?? 0} TOTAL DETECTED
+          </span>
+        </div>
+
+        {/* Night Criteria Parameters Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Luminance Ceiling', value: '< 65.0', desc: 'Frame avg grayscale intensity', color: 'text-sky-600', bg: 'bg-sky-50/60', border: 'border-sky-200/70' },
+            { label: 'Dark Pixel Floor', value: '>= 40.0%', desc: 'Pixels with intensity < 50', color: 'text-indigo-600', bg: 'bg-indigo-50/60', border: 'border-indigo-200/70' },
+            { label: 'Min Net Displacement', value: '>= 0.03', desc: 'Normalised Euclidean distance', color: 'text-blue-600', bg: 'bg-blue-50/60', border: 'border-blue-200/70' },
+            { label: 'Cumulative Path Floor', value: '>= 0.04', desc: 'Across >= 5 consecutive samples', color: 'text-cyan-600', bg: 'bg-cyan-50/60', border: 'border-cyan-200/70' },
+          ].map(item => (
+            <div key={item.label} className={`${item.bg} border ${item.border} rounded-lg p-3 flex flex-col justify-between`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-slate-800">{item.label}</span>
+                <span className={`text-base font-bold font-mono ${item.color}`}>{item.value}</span>
+              </div>
+              <p className="text-[10px] text-slate-500">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Camera Breakdown */}
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+          <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Camera Distribution</h3>
+          {nightStats && Object.keys(nightStats.camera_breakdown || {}).length > 0 ? (
+            <div className="flex flex-wrap gap-2 text-xs font-mono">
+              {Object.entries(nightStats.camera_breakdown).map(([camId, cnt]) => (
+                <span key={camId} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700">
+                  {camId}: <strong>{cnt}</strong>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400">No night movement activity recorded</span>
+          )}
+        </div>
+
+        {/* Recent Night Movements Table */}
+        {recentNightMoves.length > 0 && (
+          <div className="pt-2">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Recent Night Movements</h3>
+            <div className="overflow-x-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <tr>
+                    <th className="p-2">Track</th>
+                    <th className="p-2">Avg Luma</th>
+                    <th className="p-2">Dark Ratio</th>
+                    <th className="p-2">Displacement</th>
+                    <th className="p-2">Path Length</th>
+                    <th className="p-2">Camera</th>
+                    <th className="p-2">Detected At</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {recentNightMoves.map((nm) => (
+                    <tr key={nm.id} className="hover:bg-slate-50">
+                      <td className="p-2 font-bold text-slate-800">{nm.track_label}</td>
+                      <td className="p-2 text-sky-700 font-semibold">{nm.avg_luma}</td>
+                      <td className="p-2 text-slate-700">{(nm.dark_pixel_ratio * 100).toFixed(1)}%</td>
+                      <td className="p-2 text-slate-600">{nm.displacement}</td>
+                      <td className="p-2 text-slate-600">{nm.path_length}</td>
+                      <td className="p-2 text-slate-600">{nm.camera_id}</td>
+                      <td className="p-2 text-slate-500">
+                        {nm.detected_at ? new Date(nm.detected_at).toLocaleTimeString() : '--'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 8. UNIFIED THREAT & SECURITY INTELLIGENCE ANALYTICS (Phase 4) ── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-500" />
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Unified Security Intelligence
+            </h2>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 font-mono">
+            {secStats?.total_events ?? 0} TOTAL CORRELATED EVENTS
+          </span>
+        </div>
+
+        {/* Metric Cards: Total, Active, Resolved */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-xs text-slate-500 font-semibold uppercase">Total Correlated Episodes</div>
+            <div className="text-2xl font-bold font-mono text-[#0F2742] mt-1">{secStats?.total_events ?? 0}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Camera-bounded tracks</div>
+          </div>
+          <div className="bg-emerald-50/60 border border-emerald-200/70 rounded-lg p-3">
+            <div className="text-xs text-emerald-800 font-semibold uppercase">Active In-Frame Events</div>
+            <div className="text-2xl font-bold font-mono text-emerald-700 mt-1">{secStats?.active_events ?? 0}</div>
+            <div className="text-[10px] text-emerald-600 mt-0.5">Live active subjects</div>
+          </div>
+          <div className="bg-sky-50/60 border border-sky-200/70 rounded-lg p-3">
+            <div className="text-xs text-sky-800 font-semibold uppercase">Resolved Episodes</div>
+            <div className="text-2xl font-bold font-mono text-sky-700 mt-1">{secStats?.resolved_events ?? 0}</div>
+            <div className="text-[10px] text-sky-600 mt-0.5">Lost track timeout reaped</div>
+          </div>
+        </div>
+
+        {/* Threat Breakdown and Signal Distribution Grids */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+          {/* Threat Level Breakdown */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Threat Level Distribution</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { label: 'Critical', count: secStats?.threat_level_breakdown?.critical ?? 0, color: 'text-red-700 bg-red-100 border-red-200' },
+                { label: 'High', count: secStats?.threat_level_breakdown?.high ?? 0, color: 'text-red-600 bg-red-50 border-red-200' },
+                { label: 'Medium', count: secStats?.threat_level_breakdown?.medium ?? 0, color: 'text-amber-700 bg-amber-50 border-amber-200' },
+                { label: 'Low', count: secStats?.threat_level_breakdown?.low ?? 0, color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+              ].map(item => (
+                <div key={item.label} className={`p-2 rounded-md border text-center ${item.color}`}>
+                  <div className="text-[10px] font-bold uppercase">{item.label}</div>
+                  <div className="text-lg font-bold font-mono mt-0.5">{item.count}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Camera Distribution */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Events by Camera</h3>
+            {secStats && Object.keys(secStats.camera_breakdown || {}).length > 0 ? (
+              <div className="flex flex-wrap gap-2 text-xs font-mono">
+                {Object.entries(secStats.camera_breakdown).map(([camId, cnt]) => (
+                  <span key={camId} className="px-2 py-1 bg-white border border-slate-200 rounded text-slate-700 shadow-2xs">
+                    {camId}: <strong className="text-slate-900">{cnt}</strong>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 font-mono">No security events recorded across cameras yet.</span>
+            )}
+          </div>
+        </div>
+
+        {/* Contributing Signal Distribution */}
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+          <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Contributing Signals Breakdown</h3>
+          {secStats && Object.keys(secStats.contributing_signal_breakdown || {}).length > 0 ? (
+            <div className="flex flex-wrap gap-2 text-xs font-mono">
+              {Object.entries(secStats.contributing_signal_breakdown).map(([sig, cnt]) => (
+                <span key={sig} className="px-2.5 py-1 bg-white border border-slate-200 rounded-md text-slate-700 shadow-2xs flex items-center gap-1.5">
+                  <span className="text-amber-500">•</span>
+                  <span>{sig.replace(/_/g, ' ')}</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">{cnt}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400 font-mono">No contributing signal records yet.</span>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 };
+
