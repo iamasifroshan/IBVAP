@@ -84,18 +84,23 @@ export const BorderOverviewMap: React.FC<Props> = ({
               </filter>
             </defs>
 
-            {/* Base landform */}
-            <rect width="1000" height="500" fill="url(#terrainBg)" />
+            {/* Realistic Satellite Geospatial Imagery Base */}
+            <image 
+              href="/satellite_border_map.jpg" 
+              x="0" 
+              y="0" 
+              width="1000" 
+              height="500" 
+              preserveAspectRatio="xMidYMid slice" 
+            />
+            {/* Subtle geospatial contrast tint so tactical overlays remain clearly readable */}
+            <rect width="1000" height="500" fill="#0A160F" opacity="0.2" />
 
-            {/* Topographic Contour Bands */}
-            <path d="M-50,150 Q180,60 420,130 T850,90 T1050,180 L1050,550 L-50,550 Z" fill="#1A3323" opacity="0.85" />
-            <path d="M-50,260 Q220,180 500,240 T880,210 T1050,300 L1050,550 L-50,550 Z" fill="#13271A" opacity="0.9" />
-
-            {/* Topographic Contour Lines */}
-            <path d="M0,90 Q300,30 600,100 T1000,70" fill="none" stroke="#3D6347" strokeWidth="1" strokeDasharray="4,4" opacity="0.4" />
-            <path d="M0,170 Q320,110 650,180 T1000,140" fill="none" stroke="#3D6347" strokeWidth="1" strokeDasharray="4,4" opacity="0.4" />
-            <path d="M0,250 Q280,190 620,260 T1000,220" fill="none" stroke="#3D6347" strokeWidth="1" strokeDasharray="4,4" opacity="0.4" />
-            <path d="M0,330 Q260,270 580,340 T1000,300" fill="none" stroke="#3D6347" strokeWidth="1" strokeDasharray="4,4" opacity="0.4" />
+            {/* Subtle Topographic Contour Lines for Geographic Elevation Texture */}
+            <path d="M0,90 Q300,30 600,100 T1000,70" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
+            <path d="M0,170 Q320,110 650,180 T1000,140" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
+            <path d="M0,250 Q280,190 620,260 T1000,220" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
+            <path d="M0,330 Q260,270 580,340 T1000,300" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
 
             {/* Sector Boundary Lines */}
             <line x1="250" y1="0" x2="250" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.35" />

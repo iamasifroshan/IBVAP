@@ -10,7 +10,6 @@ import {
   Maximize2,
   BarChart3,
   Settings,
-  Sparkles,
   Zap,
   UserCheck,
   X,
@@ -57,7 +56,6 @@ export const Sidebar: React.FC = () => {
     { id: 'sentinel-query', label: 'Investigation', icon: <Search className="w-4 h-4" /> },
     { id: 'edge-guard', label: 'Edge Operations', icon: <HardDrive className="w-4 h-4" /> },
     { id: 'enviro-vision', label: 'Environment Analysis', icon: <CloudFog className="w-4 h-4" /> },
-    { id: 'ai-training-center', label: 'AI Training Center', icon: <Sparkles className="w-4 h-4" /> },
     { id: 'system-verification', label: 'System Verification', icon: <Zap className="w-4 h-4" /> }
   ];
 
