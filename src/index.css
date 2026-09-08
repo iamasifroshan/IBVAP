@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@theme {
+  --font-serif: "Times New Roman", Times, Georgia, serif;
+  --font-sans: Calibri, Candara, "Segoe UI", Arial, sans-serif;
+  --font-heading: "Times New Roman", Times, Georgia, serif;
+  --font-body: Calibri, Candara, "Segoe UI", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 :root {
   /* Official Government Operations Design System */
   --bg-main: #F8FAFC; /* very light gray */
@@ -17,7 +25,11 @@
   --text-muted: #667788;
   --text-inverse: #FFFFFF;
 
-  font-family: 'Inter', 'Noto Sans', 'Arial', sans-serif;
+  --font-body: Calibri, Candara, "Segoe UI", Arial, sans-serif;
+  --font-heading: "Times New Roman", Times, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  font-family: Calibri, Candara, "Segoe UI", Arial, sans-serif;
   color-scheme: light;
 }
 
@@ -35,15 +47,40 @@ html, body, #root {
 body {
   background-color: var(--bg-main);
   color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: Calibri, Candara, "Segoe UI", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Base headings */
-h1, h2, h3, h4, h5, h6 {
+/* Global Headings: Times New Roman for all major titles & section headings */
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: "Times New Roman", Times, Georgia, serif;
   color: var(--primary-navy);
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Utility font classes */
+.font-body {
+  font-family: Calibri, Candara, "Segoe UI", Arial, sans-serif;
+}
+
+.font-heading {
+  font-family: "Times New Roman", Times, Georgia, serif;
+}
+
+/* Technical Identifiers, Code & Monospace */
+.font-mono, code, pre, kbd, samp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Shared Tactical Card Baseline */
+.tactical-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 /* Custom Scrollbar - Light */

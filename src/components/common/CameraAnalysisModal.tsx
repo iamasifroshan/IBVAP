@@ -638,16 +638,16 @@ export const CameraAnalysisModal: React.FC<CameraAnalysisModalProps> = ({ camera
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-[#1F5F8B]/10 flex items-center justify-center text-[#1F5F8B]">
-              <Crosshair className="w-4 h-4 text-[#1F5F8B]" />
+            <div className="w-9 h-9 rounded-lg bg-[#1F5F8B]/10 flex items-center justify-center text-[#1F5F8B]">
+              <Crosshair className="w-4.5 h-4.5 text-[#1F5F8B]" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-slate-800 tracking-wide">CAMERA ANALYSIS</span>
+                <span className="font-heading font-bold text-base text-slate-900 tracking-wide uppercase">CAMERA ANALYSIS</span>
                 <span className="text-slate-300">|</span>
                 <span className="text-xs font-mono font-bold text-[#1F5F8B]">{(camera as any).camera_id || camera.id}</span>
               </div>
-              <p className="text-[11px] text-slate-500">{camera.name} · {camera.sector} · {camera.outpost}</p>
+              <p className="text-[12px] text-slate-500 font-body">{camera.name} · {camera.sector} · {camera.outpost}</p>
             </div>
           </div>
           <button

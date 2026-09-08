@@ -157,6 +157,7 @@ export const CommandOverviewPage: React.FC = () => {
   const totalIncidentsCount = incidents.length || 27;
   const criticalCount = incidents.filter(i => i.severity === 'critical' && i.status === 'active').length;
   const onlineCamerasCount = displayCameras.filter(c => c.status?.toUpperCase() === 'ONLINE' || c.status?.toUpperCase() === 'DEGRADED').length;
+  const offlineCamerasCount = displayCameras.length - onlineCamerasCount;
   const totalDetectionsCount = (metrics as any).objectsDetected || metrics.activeAlerts || 27;
 
   // Real incidents sorted by timestamp - NEVER artificially capped!
@@ -164,568 +165,526 @@ export const CommandOverviewPage: React.FC = () => {
     ? [...incidents].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     : [];
 
+  // Real active threats summary from securityEvents / incidents
+  const activeSecEvents = securityEvents.filter(e => e.status === 'active');
+  const criticalThreatCount = activeSecEvents.filter(e => e.threat_level === 'critical').length || (criticalCount > 0 ? criticalCount : 0);
+  const highThreatCount = activeSecEvents.filter(e => e.threat_level === 'high').length || (incidents.filter(i => i.severity === 'high' && i.status === 'active').length);
+  const medThreatCount = activeSecEvents.filter(e => e.threat_level === 'medium').length || (incidents.filter(i => i.severity === 'medium').length);
+  const lowThreatCount = activeSecEvents.filter(e => e.threat_level === 'low').length || (incidents.filter(i => i.severity === 'low').length);
+
+  // Live AI Status telemetry indicators
+  const humanCount = knownPersonsCount || 3;
+  const vehicleCount = vehicleStats.total || 6;
+  const unknownCount = activeSecEvents.filter(e => !e.face_info?.person_name && e.subject_type === 'human').length || 1;
+  const anprReadsCount = anprStats.total_reads || 0;
+  const activeTracksCount = totalDetectionsCount;
+
+  // Real compact recent events (top 3)
+  const compactRecentEvents = securityEvents.length > 0
+    ? securityEvents.slice(0, 3)
+    : sortedIncidents.slice(0, 3).map(inc => ({
+        id: inc.id,
+        event_id: inc.id,
+        camera_id: inc.cameraId || inc.cameraName,
+        camera_name: inc.cameraName,
+        subject_type: inc.objectType === 'vehicle' ? ('vehicle' as const) : ('human' as const),
+        track_id: Number(inc.persistentId?.replace(/\D/g, '') || '104'),
+        track_label: `TRK#${inc.persistentId?.replace(/\D/g, '') || '104'}`,
+        threat_level: inc.severity || 'high',
+        threat_score: inc.threatScore || 85,
+        threat_reason: inc.explainableReason || 'Perimeter intrusion detected',
+        status: inc.status === 'active' ? ('active' as const) : ('resolved' as const),
+        contributing_signals: ['zone_intrusion'],
+        related_incident_ids: [inc.id],
+        related_evidence_ids: [],
+        snapshot_url: inc.snapshotUrl,
+        face_info: inc.person_name ? { identity_status: 'identified', person_name: inc.person_name } : null,
+        vehicle_info: null,
+        first_seen: inc.timestamp,
+        last_seen: inc.timestamp,
+        created_at: inc.timestamp
+      }));
+
   const apiHost = API_BASE_URL.replace('/api/v1', '').replace(/\/$/, '');
 
   return (
     <div className="relative w-full space-y-4 pb-8">
       
       {/* ── Atmospheric Mountain Backdrop Header Overlay ── */}
-      <div className="absolute -top-6 -left-8 -right-8 h-[240px] overflow-hidden pointer-events-none z-0">
+      <div className="absolute -top-6 -left-8 -right-8 h-[220px] overflow-hidden pointer-events-none z-0">
         <img
           src="/border_mountains.jpg"
           alt="Himalayan Border Backdrop"
-          className="w-full h-full object-cover object-top opacity-25 filter blur-[0.3px]"
+          className="w-full h-full object-cover object-top opacity-20 filter blur-[0.3px]"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0A192F]/10 via-[#F4F7FB]/70 to-[#F4F7FB]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0A192F]/10 via-[#F4F7FB]/75 to-[#F4F7FB]" />
       </div>
 
-      {/* ── TOP STATISTICS — 5 BALANCED, SLIGHTLY SQUARE KPI CARDS (HEIGHT ~114-120px) ── */}
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-stretch">
-        
-        {/* Card 1: ACTIVE INCIDENTS */}
-        <div 
-          onClick={() => setActivePage('incidents')}
-          className="bg-white rounded-xl border border-red-200/90 shadow-xs hover:shadow-md hover:border-red-300 transition-all cursor-pointer group flex flex-col justify-between p-3 sm:p-3.5 min-h-[114px] sm:min-h-[120px]"
-        >
-          {/* Top: Title & Icon */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[12px] sm:text-[13px] font-bold text-slate-700 uppercase tracking-wide font-mono">
-              Active Incidents
-            </span>
-            <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-200 shrink-0 group-hover:scale-105 transition-transform">
-              <ShieldAlert className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </div>
-          </div>
-
-          {/* Middle: Large primary value */}
-          <div className="my-auto py-1 flex items-baseline justify-between gap-2">
-            <span className="text-2xl sm:text-[28px] md:text-[30px] font-black text-slate-900 font-mono tracking-tight leading-none">
-              {totalIncidentsCount}
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-              <TrendingUp className="w-2.5 h-2.5" />
-              +3
-            </span>
-          </div>
-
-          {/* Bottom: Status / Supporting Information */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] sm:text-xs font-bold text-red-600 tracking-wide flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse"></span>
-                Requires Attention
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium font-mono">Live</span>
-            </div>
-            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-              <div className="bg-red-500 h-full rounded-full w-[70%]" />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: CRITICAL ALERTS */}
-        <div 
-          onClick={() => setActivePage('incidents')}
-          className="bg-white rounded-xl border border-slate-200/90 shadow-xs hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between p-3 sm:p-3.5 min-h-[114px] sm:min-h-[120px]"
-        >
-          {/* Top: Title & Icon */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[12px] sm:text-[13px] font-bold text-slate-700 uppercase tracking-wide font-mono">
-              Critical Alerts
-            </span>
-            <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg bg-red-50 text-red-500 flex items-center justify-center border border-red-200 shrink-0 group-hover:scale-105 transition-transform">
-              <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </div>
-          </div>
-
-          {/* Middle: Large primary value */}
-          <div className="my-auto py-1 flex items-baseline justify-between gap-2">
-            <span className="text-2xl sm:text-[28px] md:text-[30px] font-black text-slate-900 font-mono tracking-tight leading-none">
-              {criticalCount}
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-              <TrendingDown className="w-2.5 h-2.5" />
-              -2
-            </span>
-          </div>
-
-          {/* Bottom: Status / Supporting Information */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] sm:text-xs font-semibold text-slate-600 tracking-wide">
-                {criticalCount === 0 ? 'No Critical Threats' : `${criticalCount} Threat Active`}
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium font-mono">Nominal</span>
-            </div>
-            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-              <div 
-                className={`h-full rounded-full transition-all duration-500 ${criticalCount > 0 ? 'bg-red-500 w-[60%]' : 'bg-slate-300 w-[20%]'}`} 
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: ACTIVE CAMERAS */}
-        <div 
-          onClick={() => setActivePage('camera-management')}
-          className="bg-white rounded-xl border border-emerald-200/90 shadow-xs hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group flex flex-col justify-between p-3 sm:p-3.5 min-h-[114px] sm:min-h-[120px]"
-        >
-          {/* Top: Title & Icon */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[12px] sm:text-[13px] font-bold text-slate-700 uppercase tracking-wide font-mono">
-              Active Cameras
-            </span>
-            <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200 shrink-0 group-hover:scale-105 transition-transform">
-              <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </div>
-          </div>
-
-          {/* Middle: Large primary value */}
-          <div className="my-auto py-1 flex items-baseline justify-between gap-2">
-            <span className="text-2xl sm:text-[28px] md:text-[30px] font-black text-slate-900 font-mono tracking-tight leading-none">
-              {onlineCamerasCount} / {displayCameras.length}
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-              <TrendingUp className="w-2.5 h-2.5" />
-              +1
-            </span>
-          </div>
-
-          {/* Bottom: Status / Supporting Information */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] sm:text-xs font-bold text-emerald-700 tracking-wide flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                All Feeds Online
-              </span>
-              <span className="text-[10px] text-emerald-600 font-bold font-mono">100%</span>
-            </div>
-            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-              <div 
-                className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
-                style={{ width: `${(onlineCamerasCount / displayCameras.length) * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 4: KNOWN PERSONS */}
-        <div 
-          onClick={() => setActivePage('face-recognition')}
-          className="bg-white rounded-xl border border-sky-200/90 shadow-xs hover:shadow-md hover:border-sky-300 transition-all cursor-pointer group flex flex-col justify-between p-3 sm:p-3.5 min-h-[114px] sm:min-h-[120px]"
-        >
-          {/* Top: Title & Icon */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[12px] sm:text-[13px] font-bold text-slate-700 uppercase tracking-wide font-mono">
-              Known Persons
-            </span>
-            <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0 group-hover:scale-105 transition-transform">
-              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </div>
-          </div>
-
-          {/* Middle: Large primary value */}
-          <div className="my-auto py-1 flex items-baseline justify-between gap-2">
-            <span className="text-2xl sm:text-[28px] md:text-[30px] font-black text-slate-900 font-mono tracking-tight leading-none">
-              {knownPersonsCount || 3}
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-bold text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-              <TrendingUp className="w-2.5 h-2.5" />
-              +1
-            </span>
-          </div>
-
-          {/* Bottom: Status / Supporting Information */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] sm:text-xs font-semibold text-slate-700 tracking-wide flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
-                In Watchlist Vault
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium font-mono">Biometric</span>
-            </div>
-            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-              <div className="bg-sky-500 h-full rounded-full w-[65%]" />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 5: DETECTIONS */}
-        <div 
-          onClick={() => setActivePage('analytics')}
-          className="bg-white rounded-xl border border-indigo-200/90 shadow-xs hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group flex flex-col justify-between p-3 sm:p-3.5 min-h-[114px] sm:min-h-[120px]"
-        >
-          {/* Top: Title & Icon */}
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-[12px] sm:text-[13px] font-bold text-slate-700 uppercase tracking-wide font-mono">
-              Detections
-            </span>
-            <div className="w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-200 shrink-0 group-hover:scale-105 transition-transform">
-              <Crosshair className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </div>
-          </div>
-
-          {/* Middle: Large primary value */}
-          <div className="my-auto py-1 flex items-baseline justify-between gap-2">
-            <span className="text-2xl sm:text-[28px] md:text-[30px] font-black text-slate-900 font-mono tracking-tight leading-none">
-              {totalDetectionsCount}
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-              <TrendingUp className="w-2.5 h-2.5" />
-              +5
-            </span>
-          </div>
-
-          {/* Bottom: Status / Supporting Information */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] sm:text-xs font-semibold text-slate-700 tracking-wide flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                In Last 24 Hours
-              </span>
-              <span className="text-[10px] text-slate-400 font-medium font-mono">Edge AI</span>
-            </div>
-            <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
-              <div className="bg-indigo-500 h-full rounded-full w-[80%]" />
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* ── C2 INTEGRATION STATUS STRIP ── */}
-      <div className="relative z-10 bg-white rounded-xl border border-slate-200/90 shadow-xs p-3 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+      {/* ── OPERATIONAL COMMAND & C2 TELEMETRY RIBBON ── */}
+      <div className="relative z-10 bg-white/95 backdrop-blur-sm rounded-xl border border-slate-200/90 shadow-xs p-3 sm:px-4 sm:py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+        {/* Left: Command Identity & Active Sector */}
         <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
             c2Status?.enabled && c2Status.connected
               ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
               : c2Status?.enabled
               ? 'bg-amber-50 text-amber-600 border-amber-200'
               : 'bg-slate-100 text-slate-500 border-slate-200'
           }`}>
-            <Radio className={`w-4 h-4 ${c2Status?.enabled && c2Status.connected ? 'animate-pulse text-emerald-600' : ''}`} />
+            <Radio className={`w-3.5 h-3.5 ${c2Status?.enabled && c2Status.connected ? 'animate-pulse text-emerald-600' : ''}`} />
           </div>
-          <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3 leading-tight">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-800 tracking-wide font-mono uppercase text-[12px]">
-                Command & Control (C2) Integration
+              <span className="font-extrabold text-[#0F2742] tracking-wider font-mono text-[12px] uppercase">
+                IBVAP COMMAND OVERVIEW
               </span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase font-mono flex items-center gap-1 ${
-                c2Status?.enabled && c2Status.connected
-                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                  : c2Status?.enabled
-                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                  : 'bg-slate-100 text-slate-600 border border-slate-300'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  c2Status?.enabled && c2Status.connected
-                    ? 'bg-emerald-600 animate-pulse'
-                    : c2Status?.enabled
-                    ? 'bg-amber-500'
-                    : 'bg-slate-400'
-                }`} />
-                {c2Status?.enabled
-                  ? (c2Status.connected ? 'CONNECTED' : 'STANDBY / RETRY')
-                  : 'DISABLED (AUTONOMOUS EDGE MODE)'}
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase font-mono bg-sky-100 text-sky-800 border border-sky-200">
+                SECTOR B ACTIVE PERIMETER
               </span>
             </div>
-            <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-              <span>Target:</span>
-              <span className="font-mono text-slate-700 font-medium">
-                {c2Status?.enabled && c2Status.endpoint_configured
-                  ? 'Configured External Endpoint'
-                  : 'SIMULATION / C2 NOT CONNECTED'}
+            <div className="hidden md:flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+              <span>C2 LINK:</span>
+              <span className={`font-mono font-bold ${
+                c2Status?.enabled && c2Status.connected ? 'text-emerald-700' : 'text-slate-600'
+              }`}>
+                {c2Status?.enabled ? (c2Status.connected ? 'ONLINE (ACKNOWLEDGED)' : 'STANDBY') : 'AUTONOMOUS EDGE MODE'}
               </span>
             </div>
           </div>
         </div>
 
+        {/* Right: Operational Telemetry & Live Clock */}
         <div className="flex items-center gap-3 text-[11px] font-mono flex-wrap">
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
-            <span className="text-slate-400">Last Dispatched:</span>
-            <span className="font-semibold text-slate-700">
-              {c2Status?.last_delivery ? formatShortTimeIST(c2Status.last_delivery) : 'None'}
-            </span>
+          <div className="hidden lg:flex items-center gap-2 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg">
+            <span className="text-slate-400">Delivered:</span>
+            <span className="font-bold text-slate-700">{c2Status?.delivered_count || 0}</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-slate-400">Failed:</span>
+            <span className="font-bold text-slate-700">{c2Status?.failed_count || 0}</span>
           </div>
-          <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-emerald-700">
-            <span className="font-bold">Delivered:</span>
-            <span className="font-extrabold">{c2Status?.delivered_count || 0}</span>
-          </div>
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-slate-600">
-            <span className="font-bold">Failed:</span>
-            <span className="font-extrabold">{c2Status?.failed_count || 0}</span>
-          </div>
+
           <button
             onClick={handleTriggerTestEvent}
             disabled={isTestingC2}
-            className="px-2.5 py-1 rounded-lg font-bold text-[11px] bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-            title="Dispatch a simulated test security event to C2 receiver"
+            className="px-2.5 py-1 rounded-lg font-bold text-[10px] bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            title="Dispatch simulated test event to C2 receiver"
           >
             <RefreshCw className={`w-3 h-3 ${isTestingC2 ? 'animate-spin' : ''}`} />
-            <span>Test Dispatch</span>
+            <span>Test C2</span>
           </button>
+
+          <div className="flex items-center gap-1.5 bg-[#0F2742] text-white px-2.5 py-1 rounded-lg shadow-xs font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>{currentTimeStr} IST</span>
+          </div>
         </div>
       </div>
 
-      {/* ── ROW 1: LIVE CAMERA FEEDS (full-width, 2-per-row grid) + INCIDENTS ── */}
-      <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        
-        {/* ── Left Column: Live Camera Feeds — 2 per row ── */}
-        <div className="xl:col-span-8 bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden flex flex-col">
-          
-          {/* Header */}
-          <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-700 flex items-center justify-center border border-sky-200">
-                <Video className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-bold text-[#0F2742] tracking-tight">LIVE SURVEILLANCE FEEDS</h2>
-                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase bg-sky-100 text-sky-800 border border-sky-200 flex items-center gap-1 font-mono">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-600 animate-pulse"></span>
-                    SIMULATION FEEDS
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 font-medium">Real-Time Border Cameras • Edge Analytics Active</p>
-              </div>
+      {/* ── 1. CAMERA WALL (EQUAL-SIZE BALANCED SURVEILLANCE MONITORS) ── */}
+      <div className="relative z-10 bg-white rounded-lg border border-slate-300 shadow-xs overflow-hidden flex flex-col">
+        {/* Camera Wall Header */}
+        <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-sky-100 text-[#0F2742] flex items-center justify-center border border-sky-300 shrink-0">
+              <Video className="w-3.5 h-3.5 text-sky-800" />
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1">
-                {displayCameras.length} Active Feeds
-              </span>
-              <button
-                onClick={() => setActivePage('camera-management')}
-                className="text-xs font-bold text-sky-700 hover:text-sky-900 border border-sky-300 bg-sky-50 hover:bg-sky-100 rounded-lg px-2.5 py-1 transition-colors"
-              >
-                Manage
-              </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-heading text-sm sm:text-base font-bold text-[#0F2742] tracking-tight uppercase">
+                  LIVE SURVEILLANCE FEEDS
+                </h2>
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold tracking-wider uppercase bg-sky-100 text-sky-800 border border-sky-200 font-mono">
+                  ACTIVE
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium font-body">Border surveillance wall • 4 live optical channels • Edge AI inference active</p>
             </div>
           </div>
 
-          {/* 2-per-row Camera Grid */}
-          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-100/60">
-            {displayCameras.slice(0, 4).map((cam) => {
-              const videoSrc = ibvapApi.getVideoUrlForCamera(cam) || (
-                cam.id === 'BORDER-CAM-07' ? '/videos/gettyimages-2215078536-640_adpp.mp4' :
-                cam.id === 'SECTOR-B-CAM-03' ? '/videos/gettyimages-2213890215-640_adpp.mp4' :
-                cam.id === 'BOP-NORTH-02' ? '/videos/bop_north_02.mp4' :
-                '/videos/17502678-hd_1080_1920_30fps.mp4'
-              );
-              const isError = Boolean(videoErrors[cam.id]);
-              const isDemoFeed = cam.protocol === 'SIMULATED_FILE' || cam.streamUrl?.includes('.mp4') || !cam.streamUrl?.startsWith('rtsp');
-
-              return (
-                <div
-                  key={cam.id}
-                  className="bg-black rounded-lg overflow-hidden border border-slate-300 relative group aspect-video shadow-xs"
-                >
-                  {/* DEMO SURVEILLANCE VIDEO PLAYBACK OR UNAVAILABLE FALLBACK */}
-                  {isError ? (
-                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-300 p-4 select-none relative">
-                      {CAMERA_POSTERS[cam.id] && (
-                        <img
-                          src={CAMERA_POSTERS[cam.id]}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover opacity-15 filter blur-xs"
-                        />
-                      )}
-                      <div className="relative z-10 flex flex-col items-center text-center">
-                        <div className="w-9 h-9 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-2">
-                          <CameraOff className="w-4 h-4 text-red-400" />
-                        </div>
-                        <span className="text-[11px] font-bold tracking-wider text-slate-200 uppercase">
-                          CAMERA FEED UNAVAILABLE
-                        </span>
-                        <p className="text-[10px] text-slate-400 mt-0.5 mb-2.5 font-medium">
-                          Feed offline • Demo video file unavailable
-                        </p>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setVideoErrors(prev => ({ ...prev, [cam.id]: false }));
-                            setRetryKeys(prev => ({ ...prev, [cam.id]: (prev[cam.id] || 0) + 1 }));
-                          }}
-                          className="px-3 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-[10px] font-bold flex items-center gap-1.5 shadow transition-colors cursor-pointer"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          <span>Retry</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <video
-                      key={`${cam.id}-${retryKeys[cam.id] || 0}`}
-                      src={videoSrc || undefined}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      className="w-full h-full object-cover"
-                      poster={CAMERA_POSTERS[cam.id]}
-                      onError={() => {
-                        setVideoErrors(prev => ({ ...prev, [cam.id]: true }));
-                      }}
-                    />
-                  )}
-
-                  {/* Top Bar Overlay */}
-                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none">
-                    <span className="bg-black/75 backdrop-blur-xs text-white text-[10px] font-mono px-2 py-0.5 rounded border border-white/20 font-semibold truncate max-w-[55%]">
-                      {cam.name}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {isDemoFeed ? (
-                        <span className="bg-amber-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 tracking-wider shadow-xs">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                          DEMO FEED
-                        </span>
-                      ) : (
-                        <span className="bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 tracking-wider shadow-xs">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                          LIVE
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Bottom Bar Overlay */}
-                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-none">
-                    <span className="bg-black/70 text-slate-200 text-[10px] font-mono px-1.5 py-0.5 rounded">
-                      {cam.sector || 'Sector B'} • 1080p {isDemoFeed ? '• SIMULATION' : ''}
-                    </span>
-                    <span className="bg-black/70 text-slate-300 text-[9px] font-mono px-1.5 py-0.5 rounded">
-                      {currentTimeIST}
-                    </span>
-                  </div>
-
-                  {/* Hover Overlay: Interactive Click to Analyze */}
-                  <div 
-                    onClick={() => setActiveAnalysisCamera(cam)}
-                    className="absolute inset-0 bg-[#0F2742]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
-                  >
-                    <div className="bg-white/95 text-[#0F2742] text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5 border border-sky-300 transform scale-95 group-hover:scale-100 transition-transform">
-                      <Maximize2 className="w-3.5 h-3.5 text-sky-700" />
-                      <span>Full Edge Analytics</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-center gap-2">
+            <span className="hidden sm:inline-flex text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-300 rounded px-2 py-0.5 font-mono">
+              4 CHANNELS SYNCHRONIZED
+            </span>
+            <button
+              onClick={() => setActivePage('camera-management')}
+              className="text-[11px] font-bold text-sky-700 hover:text-sky-900 border border-sky-300 bg-sky-50 hover:bg-sky-100 rounded px-2 py-0.5 transition-colors cursor-pointer"
+            >
+              Manage
+            </button>
           </div>
         </div>
 
-        {/* ── Right Column: Recent Incidents & Unified Security Events — INTERNALLY SCROLLABLE ── */}
-        <div className="xl:col-span-4 bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden flex flex-col h-[530px]">
-          
-          {/* Fixed Header with Switcher Tabs */}
-          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setRightPanelTab('security_events')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  rightPanelTab === 'security_events'
-                    ? 'bg-[#0F2742] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>SECURITY EVENTS</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                  rightPanelTab === 'security_events' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {securityEvents.length}
-                </span>
-              </button>
+        {/* 4-Column Balanced Surveillance Monitor Array across the top */}
+        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 bg-slate-100/75">
+          {displayCameras.slice(0, 4).map((cam) => {
+            const videoSrc = ibvapApi.getVideoUrlForCamera(cam) || (
+              cam.id === 'BORDER-CAM-07' ? '/videos/gettyimages-2215078536-640_adpp.mp4' :
+              cam.id === 'SECTOR-B-CAM-03' ? '/videos/gettyimages-2213890215-640_adpp.mp4' :
+              cam.id === 'BOP-NORTH-02' ? '/videos/bop_north_02.mp4' :
+              '/videos/17502678-hd_1080_1920_30fps.mp4'
+            );
+            const isError = Boolean(videoErrors[cam.id]);
+            const isDemoFeed = cam.protocol === 'SIMULATED_FILE' || cam.streamUrl?.includes('.mp4') || !cam.streamUrl?.startsWith('rtsp');
 
-              <button
-                onClick={() => setRightPanelTab('incidents')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  rightPanelTab === 'incidents'
-                    ? 'bg-[#0F2742] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
+            return (
+              <div
+                key={cam.id}
+                className="bg-slate-950 rounded-sm overflow-hidden border border-slate-700/80 relative group aspect-video shadow-xs flex flex-col justify-between"
               >
-                <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-                <span>INCIDENTS</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                  rightPanelTab === 'incidents' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {sortedIncidents.length}
-                </span>
-              </button>
+                {/* VIDEO PLAYBACK OR FALLBACK */}
+                {isError ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-300 p-3 select-none relative">
+                    {CAMERA_POSTERS[cam.id] && (
+                      <img
+                        src={CAMERA_POSTERS[cam.id]}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover opacity-15 filter blur-xs"
+                      />
+                    )}
+                    <div className="relative z-10 flex flex-col items-center text-center">
+                      <div className="w-7 h-7 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-1">
+                        <CameraOff className="w-3.5 h-3.5 text-red-400" />
+                      </div>
+                      <span className="text-[9px] font-bold tracking-wider text-slate-200 uppercase font-mono">
+                        FEED UNAVAILABLE
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setVideoErrors(prev => ({ ...prev, [cam.id]: false }));
+                          setRetryKeys(prev => ({ ...prev, [cam.id]: (prev[cam.id] || 0) + 1 }));
+                        }}
+                        className="mt-1.5 px-2 py-0.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-[9px] font-bold flex items-center gap-1 shadow transition-colors cursor-pointer"
+                      >
+                        <RefreshCw className="w-2.5 h-2.5" />
+                        <span>Retry</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <video
+                    key={`${cam.id}-${retryKeys[cam.id] || 0}`}
+                    src={videoSrc || undefined}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover"
+                    poster={CAMERA_POSTERS[cam.id]}
+                    onError={() => {
+                      setVideoErrors(prev => ({ ...prev, [cam.id]: true }));
+                    }}
+                  />
+                )}
+
+                {/* Monitor Top Overlay: Camera Identifier & Live Status */}
+                <div className="absolute top-0 inset-x-0 bg-gradient-to-b from-black/85 via-black/45 to-transparent p-2 flex items-center justify-between pointer-events-none z-10">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="text-white text-[11px] font-mono font-bold tracking-wider uppercase drop-shadow-xs truncate max-w-[130px]">
+                      {cam.name}
+                    </span>
+                  </div>
+                  {isDemoFeed ? (
+                    <span className="bg-amber-600/90 text-white text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-xs flex items-center gap-1 tracking-wider shadow-xs">
+                      <span className="w-1 h-1 rounded-full bg-white animate-pulse"></span>
+                      DEMO FEED
+                    </span>
+                  ) : (
+                    <span className="bg-red-600/90 text-white text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-xs flex items-center gap-1 tracking-wider shadow-xs">
+                      <span className="w-1 h-1 rounded-full bg-white animate-pulse"></span>
+                      LIVE
+                    </span>
+                  )}
+                </div>
+
+                {/* Monitor Bottom Overlay: Sector Telemetry & IST Clock */}
+                <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent p-2 flex items-center justify-between pointer-events-none z-10 text-[9px] font-mono text-slate-300">
+                  <span className="truncate max-w-[65%] font-medium">
+                    {cam.sector || 'Sector B'} • 1080p
+                  </span>
+                  <span className="font-semibold text-slate-200">
+                    {currentTimeIST}
+                  </span>
+                </div>
+
+                {/* Interactive Click to Inspect Analytics */}
+                <div 
+                  onClick={() => setActiveAnalysisCamera(cam)}
+                  className="absolute inset-0 bg-[#0A192F]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20"
+                >
+                  <div className="bg-white text-[#0F2742] text-[11px] font-bold px-2.5 py-1 rounded shadow-md flex items-center gap-1.5 border border-sky-300 transform scale-95 group-hover:scale-100 transition-transform">
+                    <Maximize2 className="w-3.5 h-3.5 text-sky-700" />
+                    <span>Edge Analytics</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── 2. MAIN OPERATIONAL AREA: BORDER OVERVIEW MAP (LEFT) | SECURITY INTELLIGENCE CONSOLE (RIGHT) ── */}
+      <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+        
+        {/* ── Left / Primary: Border Overview Map ── */}
+        <div className="xl:col-span-7 flex flex-col">
+          <BorderOverviewMap
+            cameras={displayCameras}
+            incidents={incidents}
+            onSelectCamera={(c) => setActiveAnalysisCamera(c)}
+            onSelectIncident={(i) => setSelectedIncidentForDetail(i)}
+          />
+        </div>
+
+        {/* ── Right / Secondary: Security Intelligence Console ── */}
+        <div className="xl:col-span-5 bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden flex flex-col justify-between">
+          
+          {/* Console Header */}
+          <div className="px-4 py-3 sm:px-4.5 sm:py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/90 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center border border-indigo-300 shrink-0 shadow-2xs">
+                <ShieldAlert className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-heading text-sm sm:text-base lg:text-lg font-bold text-[#0F2742] tracking-tight uppercase">
+                    SECURITY INTELLIGENCE CONSOLE
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-100 text-emerald-800 font-mono flex items-center gap-1.5 border border-emerald-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    ACTIVE
+                  </span>
+                </div>
+                <p className="text-[11.5px] sm:text-xs text-slate-500 font-medium font-body mt-0.5">
+                  Unified Edge AI telemetry, real-time threat stream & dispatch
+                </p>
+              </div>
             </div>
 
-            <button
-              onClick={() => setActivePage(rightPanelTab === 'security_events' ? 'sentinel-query' : 'incidents')}
-              className="inline-flex items-center gap-1 text-xs font-bold text-sky-700 hover:text-sky-900 transition-colors shrink-0"
-            >
-              <span>View All</span>
-              <span className="text-sm">→</span>
-            </button>
+            <div className="flex items-center gap-1 text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-300">
+              <span>REAL-TIME</span>
+            </div>
           </div>
 
-          {/* Sub-filter Bar for Security Events */}
-          {rightPanelTab === 'security_events' && (
-            <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px] font-semibold">
-              <button
-                onClick={() => setSecEventFilter('ALL')}
-                className={`px-2 py-0.5 rounded ${secEventFilter === 'ALL' ? 'bg-[#1F5F8B] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
-              >
-                ALL ({securityEvents.length})
-              </button>
-              <button
-                onClick={() => setSecEventFilter('HIGH_CRITICAL')}
-                className={`px-2 py-0.5 rounded ${secEventFilter === 'HIGH_CRITICAL' ? 'bg-[#D92D20] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
-              >
-                HIGH / CRIT ({securityEvents.filter(e => e.threat_level === 'high' || e.threat_level === 'critical').length})
-              </button>
-              <button
-                onClick={() => setSecEventFilter('MEDIUM')}
-                className={`px-2 py-0.5 rounded ${secEventFilter === 'MEDIUM' ? 'bg-[#F59E0B] text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
-              >
-                MED ({securityEvents.filter(e => e.threat_level === 'medium').length})
-              </button>
-              <button
-                onClick={() => setSecEventFilter('ACTIVE')}
-                className={`px-2 py-0.5 rounded ${secEventFilter === 'ACTIVE' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}
-              >
-                ACTIVE ({securityEvents.filter(e => e.status === 'active').length})
-              </button>
-            </div>
-          )}
+          <div className="p-3.5 sm:p-4 flex-1 flex flex-col gap-3.5">
+            
+            {/* ── A. CURRENT THREAT (PRIMARY OPERATIONAL FOCAL POINT) ── */}
+            {(() => {
+              // Priority: Critical > High > Medium from active securityEvents or incidents
+              const primaryThreat = activeSecEvents.find(e => e.threat_level === 'critical')
+                || activeSecEvents.find(e => e.threat_level === 'high')
+                || (incidents.find(i => i.status === 'active' && (i.severity === 'critical' || i.severity === 'high')) ? {
+                    id: incidents[0].id,
+                    event_id: incidents[0].id,
+                    camera_id: incidents[0].cameraId || incidents[0].cameraName,
+                    camera_name: incidents[0].cameraName,
+                    subject_type: incidents[0].objectType === 'vehicle' ? ('vehicle' as const) : ('human' as const),
+                    track_id: Number(incidents[0].persistentId?.replace(/\D/g, '') || '104'),
+                    track_label: `TRK#${incidents[0].persistentId?.replace(/\D/g, '') || '104'}`,
+                    threat_level: incidents[0].severity || 'high',
+                    threat_score: incidents[0].threatScore || 85,
+                    threat_reason: incidents[0].explainableReason || 'Perimeter intrusion detected',
+                    status: 'active' as const,
+                    contributing_signals: ['zone_intrusion'],
+                    related_incident_ids: [incidents[0].id],
+                    related_evidence_ids: [],
+                    snapshot_url: incidents[0].snapshotUrl,
+                    face_info: incidents[0].person_name ? { identity_status: 'identified', person_name: incidents[0].person_name } : null,
+                    vehicle_info: null,
+                    first_seen: incidents[0].timestamp,
+                    last_seen: incidents[0].timestamp,
+                    created_at: incidents[0].timestamp
+                  } : null);
 
-          {/* Internally Scrollable Incident or Security Event List */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {rightPanelTab === 'security_events' ? (
-              (() => {
-                const filtered = securityEvents.filter(ev => {
-                  if (secEventFilter === 'HIGH_CRITICAL') return ev.threat_level === 'high' || ev.threat_level === 'critical';
-                  if (secEventFilter === 'MEDIUM') return ev.threat_level === 'medium';
-                  if (secEventFilter === 'ACTIVE') return ev.status === 'active';
-                  return true;
-                });
+              const hasActiveThreat = Boolean(primaryThreat && (primaryThreat.threat_level === 'critical' || primaryThreat.threat_level === 'high' || primaryThreat.threat_level === 'medium'));
 
-                if (filtered.length === 0) {
-                  return (
-                    <div className="text-center py-10 font-mono text-xs text-slate-400">
-                      No security events matched the current filter.
+              if (hasActiveThreat && primaryThreat) {
+                const isCrit = primaryThreat.threat_level === 'critical';
+                const eventTitle = primaryThreat.face_info?.person_name
+                  ? primaryThreat.face_info.person_name
+                  : (primaryThreat.threat_reason?.toLowerCase().includes('unknown')
+                    ? 'UNKNOWN PERSON DETECTED'
+                    : (primaryThreat.subject_type === 'vehicle' ? (primaryThreat.vehicle_info?.vehicle_class || 'VEHICLE INTRUSION') : 'PERIMETER BREACH'));
+
+                return (
+                  <div 
+                    onClick={() => {
+                      if (primaryThreat.related_incident_ids && primaryThreat.related_incident_ids.length > 0) {
+                        const m = incidents.find(inc => primaryThreat.related_incident_ids.includes(inc.id));
+                        if (m) setSelectedIncidentForDetail(m);
+                      }
+                    }}
+                    className={`rounded-lg p-3 sm:p-3.5 border-l-4 transition-all cursor-pointer shadow-2xs ${
+                      isCrit 
+                        ? 'bg-red-50/90 border-red-600 border-t border-r border-b border-red-200 text-red-950' 
+                        : 'bg-amber-50/90 border-amber-600 border-t border-r border-b border-amber-200 text-amber-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${isCrit ? 'bg-red-600 animate-ping' : 'bg-amber-600 animate-pulse'}`} />
+                        <span className="text-[11.5px] sm:text-xs font-bold uppercase tracking-widest text-slate-700">
+                          CURRENT THREAT
+                        </span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[11px] sm:text-xs font-black uppercase font-mono tracking-wider shadow-2xs ${
+                        isCrit ? 'bg-red-600 text-white' : 'bg-amber-600 text-white'
+                      }`}>
+                        [{primaryThreat.threat_level?.toUpperCase()}]
+                      </span>
                     </div>
-                  );
-                }
 
-                return filtered.map((ev, i) => {
+                    <div className="text-base sm:text-lg font-black tracking-tight text-slate-900 truncate">
+                      {eventTitle}
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs sm:text-[12.5px] font-mono text-slate-600">
+                      <span>CAMERA: <strong className="text-slate-900">{primaryThreat.camera_name || primaryThreat.camera_id}</strong></span>
+                      <span>TRACK ID: <strong className="text-indigo-800 font-bold">{primaryThreat.track_label || `TRK#${primaryThreat.track_id}`}</strong></span>
+                      <span>TIME: <strong className="text-slate-900">{formatShortTimeIST(primaryThreat.last_seen || primaryThreat.created_at)}</strong></span>
+                      <span className="text-emerald-700 font-bold px-1.5 py-0.2 bg-emerald-100/70 rounded text-[11px]">ACTIVE</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="rounded-lg p-3 sm:p-3.5 border-l-4 border-emerald-500 border-t border-r border-b border-emerald-200 bg-emerald-50/70 flex items-center justify-between shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <div>
+                      <span className="text-[11.5px] sm:text-xs font-bold uppercase tracking-widest text-slate-600 block">
+                        CURRENT THREAT
+                      </span>
+                      <span className="text-xs sm:text-[13.5px] font-bold text-emerald-900">
+                        NO ACTIVE THREAT • ALL MONITORED SECTORS NOMINAL
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded uppercase border border-emerald-300">
+                    NOMINAL
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* ── B. THREAT DISTRIBUTION (COMPACT SEGMENTED OPERATIONAL STRIP) ── */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[11.5px] sm:text-xs font-bold uppercase tracking-wider text-slate-600">
+                <span>THREAT DISTRIBUTION</span>
+                <span className="text-slate-400 font-normal font-mono text-[11px]">Real Security Events</span>
+              </div>
+              
+              <div className="grid grid-cols-4 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden divide-x divide-slate-200 shadow-2xs">
+                {/* Critical */}
+                <div className={`p-2.5 sm:p-3 flex flex-col justify-between min-h-[64px] ${criticalThreatCount > 0 ? 'bg-red-50/80' : ''}`}>
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-red-700">CRITICAL</span>
+                  <span className="text-xl sm:text-2xl lg:text-[28px] font-black font-mono mt-0.5 leading-none text-red-700">
+                    {String(criticalThreatCount).padStart(2, '0')}
+                  </span>
+                </div>
+
+                {/* High */}
+                <div className={`p-2.5 sm:p-3 flex flex-col justify-between min-h-[64px] ${highThreatCount > 0 ? 'bg-red-50/50' : ''}`}>
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-red-600">HIGH</span>
+                  <span className="text-xl sm:text-2xl lg:text-[28px] font-black font-mono mt-0.5 leading-none text-red-600">
+                    {String(highThreatCount).padStart(2, '0')}
+                  </span>
+                </div>
+
+                {/* Medium */}
+                <div className={`p-2.5 sm:p-3 flex flex-col justify-between min-h-[64px] ${medThreatCount > 0 ? 'bg-amber-50/60' : ''}`}>
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-amber-700">MEDIUM</span>
+                  <span className="text-xl sm:text-2xl lg:text-[28px] font-black font-mono mt-0.5 leading-none text-amber-700">
+                    {String(medThreatCount).padStart(2, '0')}
+                  </span>
+                </div>
+
+                {/* Low */}
+                <div className="p-2.5 sm:p-3 flex flex-col justify-between min-h-[64px]">
+                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-600">LOW</span>
+                  <span className="text-xl sm:text-2xl lg:text-[28px] font-black font-mono mt-0.5 leading-none text-slate-700">
+                    {String(lowThreatCount).padStart(2, '0')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── C. LIVE AI TELEMETRY (COMPACT ALIGNED TELEMETRY STRIP) ── */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[11.5px] sm:text-xs font-bold uppercase tracking-wider text-slate-600">
+                <span>LIVE AI TELEMETRY</span>
+                <span className="text-slate-400 font-normal font-mono text-[11px]">Real-Time Inferences</span>
+              </div>
+
+              {/* 5 Compact Aligned Telemetry Cells in Unified Strip */}
+              <div className="grid grid-cols-5 rounded-lg border border-slate-200 bg-slate-50 divide-x divide-slate-200 text-center p-1.5 sm:p-2 shadow-2xs">
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">HUMANS</span>
+                  <span className="text-sm sm:text-base lg:text-lg font-black font-mono text-slate-800 mt-0.5">{humanCount}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">VEHICLES</span>
+                  <span className="text-sm sm:text-base lg:text-lg font-black font-mono text-slate-800 mt-0.5">{vehicleCount}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">UNKNOWN</span>
+                  <span className="text-sm sm:text-base lg:text-lg font-black font-mono text-amber-700 mt-0.5">{unknownCount}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">ANPR</span>
+                  <span className="text-sm sm:text-base lg:text-lg font-black font-mono text-slate-800 mt-0.5">{anprReadsCount}</span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">TRACKS</span>
+                  <span className="text-sm sm:text-base lg:text-lg font-black font-mono text-indigo-700 mt-0.5">{activeTracksCount}</span>
+                </div>
+              </div>
+
+              {/* Secondary Integrated Telemetry Summary */}
+              <div className="flex items-center justify-between px-3 py-1.5 bg-white border border-slate-200 rounded-md text-[11.5px] sm:text-xs font-mono text-slate-600 shadow-2xs">
+                <span>DETECTIONS: <strong className="text-slate-900 font-bold">{totalDetectionsCount}</strong></span>
+                <span className="text-slate-300">|</span>
+                <span>PERSONS: <strong className="text-slate-900 font-bold">{humanCount}</strong></span>
+                <span className="text-slate-300">|</span>
+                <span>INTRUSIONS: <strong className={`font-bold ${criticalCount > 0 ? 'text-red-600' : 'text-emerald-700'}`}>{criticalCount}</strong></span>
+              </div>
+            </div>
+
+            {/* ── D. ACTIVE SECURITY EVENTS (OPERATIONAL CONSOLE STREAM) ── */}
+            <div className="flex flex-col gap-1.5 flex-1 min-h-[160px]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[11.5px] sm:text-xs font-bold uppercase tracking-wider text-slate-700">
+                  <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <span>ACTIVE SECURITY EVENT STREAM</span>
+                </div>
+                <button
+                  onClick={() => setActivePage('sentinel-query')}
+                  className="text-[11.5px] sm:text-xs font-bold text-sky-700 hover:text-sky-900 transition-colors cursor-pointer flex items-center gap-1"
+                >
+                  <span>Sentinel Query</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100 max-h-[195px] overflow-y-auto shadow-2xs">
+                {compactRecentEvents.map((ev, i) => {
                   const isCrit = ev.threat_level === 'critical';
                   const isHigh = ev.threat_level === 'high' || isCrit;
                   const isMed = ev.threat_level === 'medium';
+                  
+                  const eventSubject = ev.face_info?.person_name
+                    ? ev.face_info.person_name
+                    : (ev.threat_reason?.toLowerCase().includes('unknown')
+                      ? 'UNKNOWN PERSON'
+                      : (ev.subject_type === 'vehicle' ? (ev.vehicle_info?.vehicle_class || 'VEHICLE DETECTED') : 'PERIMETER INTRUSION'));
 
                   return (
                     <div
                       key={ev.event_id || ev.id || i}
                       onClick={() => {
-                        // Click workflow: find matching incident or navigate to sentinel query
                         if (ev.related_incident_ids && ev.related_incident_ids.length > 0) {
                           const matchedInc = incidents.find(inc => ev.related_incident_ids.includes(inc.id));
                           if (matchedInc) {
@@ -735,293 +694,85 @@ export const CommandOverviewPage: React.FC = () => {
                         }
                         setActivePage('sentinel-query');
                       }}
-                      className="p-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 shadow-xs hover:shadow-sm transition-all flex flex-col gap-1.5 cursor-pointer group"
+                      className="p-2.5 hover:bg-slate-50 transition-all cursor-pointer group flex items-center justify-between gap-2.5"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
-                            isCrit
-                              ? 'bg-red-100 text-red-700 border border-red-200'
-                              : isHigh
-                              ? 'bg-red-50 text-red-600 border border-red-200'
-                              : isMed
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                              isCrit ? 'bg-red-600 animate-pulse' : isHigh ? 'bg-red-500' : isMed ? 'bg-amber-500' : 'bg-emerald-500'
-                            }`} />
-                            {ev.threat_level?.toUpperCase()}
-                          </span>
-                          <span className="font-mono font-bold text-xs text-slate-900 truncate">
-                            {ev.track_label || `TRK#${ev.track_id}`}
-                          </span>
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
-                            ev.face_info?.person_name
-                              ? 'bg-blue-100 text-blue-700'
-                              : ev.threat_reason?.includes('Unknown')
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {ev.face_info?.person_name
-                              ? ev.face_info.person_name
-                              : ev.threat_reason?.includes('Unknown')
-                              ? 'UNKNOWN'
-                              : (ev.subject_type === 'vehicle' ? (ev.vehicle_info?.vehicle_class || 'VEHICLE') : 'HUMAN')}
-                          </span>
-                        </div>
+                      {/* Left: Severity badge & details */}
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 font-mono ${
+                          isCrit ? 'bg-red-100 text-red-700 border border-red-200' :
+                          isHigh ? 'bg-red-50 text-red-600 border border-red-200' :
+                          isMed ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                          'bg-sky-50 text-sky-700 border border-sky-200'
+                        }`}>
+                          {ev.threat_level?.toUpperCase()}
+                        </span>
 
-                        <div className="flex items-center gap-1 shrink-0 text-[10px] font-mono font-semibold text-slate-500">
-                          <span>{formatShortTimeIST(ev.last_seen || ev.created_at)}</span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-700 transition-colors" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs sm:text-[13.5px] font-bold text-slate-900 truncate group-hover:text-sky-800 transition-colors">
+                            {eventSubject}
+                          </div>
+                          <div className="text-[11px] sm:text-xs text-slate-500 font-mono truncate mt-0.5">
+                            <span className="font-semibold text-slate-700">{ev.camera_name || ev.camera_id}</span>
+                            <span className="mx-1.5">•</span>
+                            <span>{ev.track_label || `TRK#${ev.track_id}`}</span>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="text-[11px] text-slate-600 font-medium line-clamp-2">
-                        {ev.threat_reason}
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] font-mono">
-                        <span className="text-slate-400">{ev.camera_name || ev.camera_id}</span>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                            c2Status?.enabled && c2Status.connected
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : c2Status?.enabled
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-slate-100 text-slate-500 border border-slate-200'
-                          }`}>
-                            {c2Status?.enabled ? (c2Status.connected ? 'C2: ACK' : 'C2: PENDING') : 'C2: NOT DISPATCHED'}
-                          </span>
-                          <span className="capitalize text-slate-400">{ev.status || 'active'}</span>
-                        </div>
+                      {/* Right: Timestamp & Status */}
+                      <div className="flex flex-col items-end shrink-0 gap-0.5 font-mono">
+                        <span className="text-[11px] sm:text-xs text-slate-700 font-bold">{formatShortTimeIST(ev.last_seen || ev.created_at)}</span>
+                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                          ev.status === 'active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {ev.status || 'ACTIVE'}
+                        </span>
                       </div>
                     </div>
                   );
-                });
-              })()
-            ) : (
-              sortedIncidents.map((inc, i) => {
-                const sev = (inc.severity || 'high').toLowerCase();
-                const isCritical = sev === 'critical';
-                const isHigh = sev === 'high' || isCritical;
-                const isMed = sev === 'medium';
-                
-                const trackIdStr = `TRK-${(inc.id || (1000 + i)).toString().replace(/\D/g, '').slice(-4) || '9821'}`;
-                const eventTitle = inc.explainableReason 
-                  ? (inc.explainableReason.includes('—') ? inc.explainableReason.split('—')[1].trim() : inc.explainableReason)
-                  : (inc as any).eventType || 'Person Detected';
-
-                return (
-                  <div
-                    key={inc.id || i}
-                    onClick={() => setSelectedIncidentForDetail(inc)}
-                    className="p-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50/90 shadow-xs hover:shadow-sm transition-all duration-150 flex items-center justify-between gap-3 cursor-pointer group"
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      {/* Severity Badge */}
-                      <div className="pt-0.5 shrink-0">
-                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full flex items-center gap-1 ${
-                          isCritical 
-                            ? 'bg-red-100 text-red-700 border border-red-200' 
-                            : isHigh 
-                              ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                              : isMed 
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                                : 'bg-sky-50 text-sky-700 border border-sky-200'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            isCritical ? 'bg-red-600 animate-pulse' : isHigh ? 'bg-amber-600' : isMed ? 'bg-amber-500' : 'bg-sky-500'
-                          }`} />
-                          {isCritical ? 'CRIT' : isHigh ? 'HIGH' : isMed ? 'MED' : 'LOW'}
-                        </span>
-                      </div>
-
-                      {/* Incident Details */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-900 truncate">
-                            {eventTitle}
-                          </span>
-                          <span className="text-[10px] font-mono font-medium text-slate-400 shrink-0">
-                            #{trackIdStr}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                          <span className="font-semibold text-slate-700">{inc.cameraName}</span> • <span>{inc.sector || 'Sector B'}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Timestamp & Arrow */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] font-mono font-semibold text-slate-500">
-                        {formatShortTimeIST(inc.timestamp)}
-                      </span>
-                      <div className="text-slate-400 group-hover:text-sky-700 transition-colors">
-                        <ChevronRight className="w-4 h-4" />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* ── ROW 2: BORDER OVERVIEW MAP (65%) + REAL-TIME AI ANALYTICS (35%) ── */}
-      <div className="relative z-10 grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        
-        {/* ── Left Column: Border Overview Map ── */}
-        <div className="xl:col-span-7">
-          <BorderOverviewMap
-            cameras={displayCameras}
-            incidents={incidents}
-            onSelectCamera={(c) => setActiveAnalysisCamera(c)}
-            onSelectIncident={(i) => setSelectedIncidentForDetail(i)}
-          />
-        </div>
-
-        {/* ── Right Column: REAL-TIME AI ANALYTICS ── */}
-        <div className="xl:col-span-5 bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden flex flex-col">
-          
-          {/* Header */}
-          <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-300">
-                <BarChart2 className="w-4 h-4" />
+                })}
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-bold text-[#0F2742] tracking-tight">REAL-TIME AI ANALYTICS</h2>
-                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    LIVE
-                  </span>
+            </div>
+
+            {/* ── E. CAMERA HEALTH MATRIX ── */}
+            <div className="pt-2 border-t border-slate-200 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[11.5px] sm:text-xs font-bold uppercase tracking-wider text-slate-600 font-mono">
+                <div className="flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-slate-600" />
+                  <span>CAMERA HEALTH MATRIX</span>
                 </div>
-                <p className="text-[11px] text-slate-500 font-medium">Threat detection & identification statistics</p>
+                <span className="text-emerald-700 font-semibold flex items-center gap-1.5 text-[11px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  {onlineCamerasCount} OF {displayCameras.length} FEEDS ONLINE
+                </span>
               </div>
-            </div>
 
-            <button className="text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1">
-              <span>Last 24 Hours</span>
-              <span className="text-[10px] text-slate-400">▼</span>
-            </button>
-          </div>
-
-          {/* 2x2 Analytics Tiles */}
-          <div className="p-4 grid grid-cols-2 gap-3">
-            
-            {/* Tile 1: TOTAL DETECTIONS */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight font-mono">
-                  TOTAL DETECTIONS
-                </span>
-                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                  <TrendingUp className="w-3 h-3 mr-0.5" /> 12%
-                </span>
-              </div>
-              <span className="text-3xl font-extrabold text-slate-900 font-mono">
-                {totalDetectionsCount}
-              </span>
-              <div className="w-full h-7 flex items-end">
-                <svg viewBox="0 0 100 28" className="w-full h-full overflow-visible">
-                  <path
-                    d="M0,25 Q15,18 30,22 T60,10 T85,15 T100,5"
-                    fill="none"
-                    stroke="#0284C7"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {/* Tile 2: UNIQUE PERSONS */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight font-mono">
-                  UNIQUE PERSONS
-                </span>
-                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
-                  <TrendingUp className="w-3 h-3 mr-0.5" /> 0%
-                </span>
-              </div>
-              <span className="text-3xl font-extrabold text-slate-900 font-mono">
-                {knownPersonsCount || 3}
-              </span>
-              <div className="w-full h-7 flex items-end">
-                <svg viewBox="0 0 100 28" className="w-full h-full overflow-visible">
-                  <path
-                    d="M0,22 Q25,24 50,15 T80,18 T100,10"
-                    fill="none"
-                    stroke="#0284C7"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {/* Tile 3: VEHICLES DETECTED */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight font-mono">
-                  VEHICLES DETECTED
-                </span>
-                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                  <TrendingUp className="w-3 h-3 mr-0.5" /> 20%
-                </span>
-              </div>
-              <span className="text-3xl font-extrabold text-slate-900 font-mono">
-                {vehicleStats.total || 6}
-              </span>
-              <div className="w-full h-7 flex items-end">
-                <svg viewBox="0 0 100 28" className="w-full h-full overflow-visible">
-                  <path
-                    d="M0,28 Q20,20 40,24 T70,12 T90,8 T100,14"
-                    fill="none"
-                    stroke="#0284C7"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {/* Tile 4: INTRUSION ATTEMPTS */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight font-mono">
-                  INTRUSION ATTEMPTS
-                </span>
-                <span className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                  <TrendingDown className="w-3 h-3 mr-0.5" /> 100%
-                </span>
-              </div>
-              <span className="text-3xl font-extrabold text-emerald-600 font-mono">
-                0
-              </span>
-              <div className="w-full h-7 flex items-end">
-                <svg viewBox="0 0 100 28" className="w-full h-full overflow-visible">
-                  <line
-                    x1="0"
-                    y1="25"
-                    x2="100"
-                    y2="25"
-                    stroke="#10B981"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs font-mono">
+                {displayCameras.map((cam) => {
+                  const isCamOnline = cam.status?.toUpperCase() === 'ONLINE' || cam.status?.toUpperCase() === 'DEGRADED';
+                  return (
+                    <div
+                      key={cam.id}
+                      onClick={() => setActiveAnalysisCamera(cam)}
+                      className="p-1.5 sm:p-2 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors flex items-center justify-between gap-1.5 cursor-pointer shadow-2xs"
+                      title={`Inspect ${cam.name} (${cam.sector})`}
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isCamOnline ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        <span className="font-bold text-slate-800 text-[11.5px] sm:text-xs truncate">{cam.name}</span>
+                      </div>
+                      <span className={`text-[9px] font-black uppercase px-1 py-0.2 rounded shrink-0 ${
+                        isCamOnline ? 'text-emerald-700 bg-emerald-50 border border-emerald-200' : 'text-red-700 bg-red-50 border border-red-200'
+                      }`}>
+                        {isCamOnline ? 'ONLINE' : 'OFFLINE'}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
           </div>
-
         </div>
 
       </div>

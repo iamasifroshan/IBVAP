@@ -204,16 +204,16 @@ export const AnalyticsPage: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-xl font-bold text-[#0F2742] tracking-tight">
-                Analytics
+              <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0F2742] tracking-tight">
+                Analytics & Threat Distribution
               </h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 Live Edge Telemetry
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Real-time AI detection and border monitoring statistics.
+            <p className="text-[13px] sm:text-[14px] text-slate-500 mt-0.5 font-body">
+              Historical & aggregate AI inference telemetry across border surveillance sectors.
             </p>
           </div>
         </div>
@@ -221,10 +221,10 @@ export const AnalyticsPage: React.FC = () => {
         <button
           onClick={loadAnalytics}
           disabled={loading}
-          className="px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-700 transition-colors flex items-center gap-1.5 text-xs font-semibold shadow-2xs self-start sm:self-auto shrink-0"
+          className="h-10 px-3.5 border border-slate-200 hover:bg-slate-50 rounded-lg text-slate-700 transition-colors flex items-center gap-2 text-xs font-semibold shadow-2xs self-start sm:self-auto shrink-0 font-body"
           title="Refresh Telemetry Metrics"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#1F5F8B]' : 'text-slate-500'}`} />
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#1F5F8B]' : 'text-slate-500'}`} />
           <span>Refresh</span>
         </button>
       </div>
@@ -244,9 +244,8 @@ export const AnalyticsPage: React.FC = () => {
             <div className="text-2xl sm:text-3xl font-black text-[#0F2742] leading-none">
               {metrics.totalDetections.toLocaleString('en-IN')}
             </div>
-            <div className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-1.5">
-              <TrendingUp className="w-3 h-3" />
-              <span>↑ 12% today</span>
+            <div className="text-[11px] font-medium text-slate-500 mt-1.5">
+              Cumulative edge inference frames
             </div>
           </div>
         </div>
@@ -254,7 +253,7 @@ export const AnalyticsPage: React.FC = () => {
         {/* CONFIRMED THREATS */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-2xs flex flex-col justify-between h-[120px]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Confirmed Threats</span>
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Confirmed Threats (Analytics)</span>
             <div className="w-8 h-8 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center text-[#D92D20]">
               <ShieldAlert className="w-4 h-4" />
             </div>
@@ -264,7 +263,7 @@ export const AnalyticsPage: React.FC = () => {
               {metrics.totalThreats.toLocaleString('en-IN')}
             </div>
             <div className="text-[11px] font-medium text-slate-500 mt-1.5">
-              Critical & verified security alerts
+              Historical aggregate security detections
             </div>
           </div>
         </div>
@@ -386,18 +385,18 @@ export const AnalyticsPage: React.FC = () => {
       {/* ── 4. Split Section: Live Detection Activity & Threat Level ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
-        {/* Left Column (7 cols): LIVE DETECTION ACTIVITY */}
+        {/* Left Column (7 cols): AGGREGATE EDGE INFERENCE VOLUME */}
         <div className="lg:col-span-7 xl:col-span-8 bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <div>
               <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Live Detection Activity
+                Aggregate Edge Inference Volume
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">Detections recorded over recent time period</p>
+              <p className="text-xs text-slate-400 mt-0.5">Cumulative edge inference samples across surveillance cameras</p>
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
               <span className="w-2 h-2 rounded-full bg-[#1F5F8B]"></span>
-              <span>Detections Volume</span>
+              <span>Inference Volume</span>
             </div>
           </div>
 
@@ -411,7 +410,7 @@ export const AnalyticsPage: React.FC = () => {
                     className="absolute z-20 bg-slate-900 text-white text-[11px] font-mono px-2.5 py-1 rounded shadow-xl pointer-events-none transform -translate-x-1/2 -translate-y-8 whitespace-nowrap border border-slate-700"
                     style={{ left: `${(hoveredPoint.x / chartData.width) * 100}%`, top: `${(hoveredPoint.y / chartData.height) * 100}%` }}
                   >
-                    <strong>{hoveredPoint.count.toLocaleString()}</strong> detections at {hoveredPoint.time}
+                    <strong>{hoveredPoint.count.toLocaleString()}</strong> inference samples at {hoveredPoint.time}
                   </div>
                 )}
 
@@ -590,7 +589,7 @@ export const AnalyticsPage: React.FC = () => {
           </div>
 
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
-            <span>Total Evaluated Threats:</span>
+            <span>Total Evaluated Threats (Analytics Dataset):</span>
             <span className="font-bold text-[#0F2742] font-mono">{metrics.totalThreats}</span>
           </div>
         </div>
@@ -717,35 +716,64 @@ export const AnalyticsPage: React.FC = () => {
 
         {/* Recent Suspicious Activities Table */}
         {recentSuspicious.length > 0 && (
-          <div className="pt-2">
-            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Recent Episodes</h3>
-            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+          <div className="pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-heading text-xs sm:text-[13px] font-bold text-slate-700 uppercase tracking-wider">
+                Recent Episodes
+              </h3>
+              <span className="text-xs text-slate-400 font-mono font-medium">
+                Showing {recentSuspicious.length} recorded events
+              </span>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs bg-white">
+              <table className="w-full text-left font-body">
+                <thead className="bg-slate-50/90 text-slate-600 border-b border-slate-200 font-heading text-xs uppercase tracking-wider">
                   <tr>
-                    <th className="p-2">Track</th>
-                    <th className="p-2">Behavior</th>
-                    <th className="p-2">Severity</th>
-                    <th className="p-2">Duration</th>
-                    <th className="p-2">Camera</th>
-                    <th className="p-2">Description</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Track</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Behavior</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Severity</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Duration</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Camera</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Description</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
+                <tbody className="divide-y divide-slate-100 bg-white text-xs sm:text-[13px]">
                   {recentSuspicious.map((act) => (
-                    <tr key={act.id} className="hover:bg-slate-50">
-                      <td className="p-2 font-bold text-slate-800">{act.track_label}</td>
-                      <td className="p-2 text-amber-700 font-semibold">{act.activity_type.replace(/_/g, ' ')}</td>
-                      <td className="p-2">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          act.severity === 'HIGH' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    <tr key={act.id} className="hover:bg-blue-50/30 transition-colors">
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className="font-mono font-bold text-xs text-blue-900 bg-blue-50/90 border border-blue-200/80 px-2.5 py-1 rounded-md shadow-2xs">
+                          {act.track_label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className={`font-semibold tracking-wide ${
+                          act.activity_type.includes('RESTRICTED') 
+                            ? 'text-amber-800' 
+                            : act.activity_type.includes('RAPID') 
+                            ? 'text-red-700' 
+                            : 'text-orange-700'
+                        }`}>
+                          {act.activity_type.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold font-mono tracking-wide ${
+                          act.severity === 'HIGH' 
+                            ? 'bg-red-50 text-red-700 border border-red-200' 
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
                         }`}>
                           {act.severity}
                         </span>
                       </td>
-                      <td className="p-2 text-slate-600">{act.duration_sec}s</td>
-                      <td className="p-2 text-slate-600">{act.camera_id}</td>
-                      <td className="p-2 text-slate-500 max-w-xs truncate" title={act.description || ''}>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 font-mono font-semibold text-slate-700 whitespace-nowrap">
+                        {act.duration_sec}s
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className="font-mono text-xs font-semibold text-slate-700 bg-slate-50 px-2.5 py-1 rounded border border-slate-200/80">
+                          {act.camera_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 text-slate-600 leading-relaxed min-w-[280px]" title={act.description || ''}>
                         {act.description || '--'}
                       </td>
                     </tr>
@@ -807,31 +835,56 @@ export const AnalyticsPage: React.FC = () => {
 
         {/* Recent Night Movements Table */}
         {recentNightMoves.length > 0 && (
-          <div className="pt-2">
-            <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">Recent Night Movements</h3>
-            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+          <div className="pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-heading text-xs sm:text-[13px] font-bold text-slate-700 uppercase tracking-wider">
+                Recent Night Movements
+              </h3>
+              <span className="text-xs text-slate-400 font-mono font-medium">
+                Showing {recentNightMoves.length} recorded events
+              </span>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs bg-white">
+              <table className="w-full text-left font-body">
+                <thead className="bg-slate-50/90 text-slate-600 border-b border-slate-200 font-heading text-xs uppercase tracking-wider">
                   <tr>
-                    <th className="p-2">Track</th>
-                    <th className="p-2">Avg Luma</th>
-                    <th className="p-2">Dark Ratio</th>
-                    <th className="p-2">Displacement</th>
-                    <th className="p-2">Path Length</th>
-                    <th className="p-2">Camera</th>
-                    <th className="p-2">Detected At</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Track</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Avg Luma</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Dark Ratio</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Displacement</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Path Length</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Camera</th>
+                    <th className="px-4 py-3.5 sm:px-5 sm:py-4 font-bold text-slate-700">Detected At</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
+                <tbody className="divide-y divide-slate-100 bg-white text-xs sm:text-[13px]">
                   {recentNightMoves.map((nm) => (
-                    <tr key={nm.id} className="hover:bg-slate-50">
-                      <td className="p-2 font-bold text-slate-800">{nm.track_label}</td>
-                      <td className="p-2 text-sky-700 font-semibold">{nm.avg_luma}</td>
-                      <td className="p-2 text-slate-700">{(nm.dark_pixel_ratio * 100).toFixed(1)}%</td>
-                      <td className="p-2 text-slate-600">{nm.displacement}</td>
-                      <td className="p-2 text-slate-600">{nm.path_length}</td>
-                      <td className="p-2 text-slate-600">{nm.camera_id}</td>
-                      <td className="p-2 text-slate-500">
+                    <tr key={nm.id} className="hover:bg-blue-50/30 transition-colors">
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className="font-mono font-bold text-xs text-blue-900 bg-blue-50/90 border border-blue-200/80 px-2.5 py-1 rounded-md shadow-2xs">
+                          {nm.track_label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className="font-mono text-xs font-bold text-sky-800 bg-sky-50 px-2.5 py-1 rounded border border-sky-200/70">
+                          {nm.avg_luma}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 font-mono font-bold text-slate-800 whitespace-nowrap">
+                        {(nm.dark_pixel_ratio * 100).toFixed(1)}%
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 font-mono text-slate-700 whitespace-nowrap">
+                        {nm.displacement}
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 font-mono text-slate-700 whitespace-nowrap">
+                        {nm.path_length}
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 whitespace-nowrap">
+                        <span className="font-mono text-xs font-semibold text-slate-700 bg-slate-50 px-2.5 py-1 rounded border border-slate-200/80">
+                          {nm.camera_id}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 sm:px-5 sm:py-4 font-mono text-slate-600 whitespace-nowrap">
                         {nm.detected_at ? new Date(nm.detected_at).toLocaleTimeString() : '--'}
                       </td>
                     </tr>

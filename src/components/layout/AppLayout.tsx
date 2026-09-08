@@ -6,6 +6,7 @@ import { Footer } from './Footer';
 import { CommandOverviewPage } from '../pages/CommandOverviewPage';
 import { LiveSurveillancePage } from '../pages/LiveSurveillancePage';
 import { IncidentsPage } from '../pages/IncidentsPage';
+import { EvidencePage } from '../pages/EvidencePage';
 import { SentinelQueryPage } from '../pages/SentinelQueryPage';
 import { EnviroVisionPage } from '../pages/EnviroVisionPage';
 import { EdgeGuardPage } from '../pages/EdgeGuardPage';
@@ -37,6 +38,8 @@ export const AppLayout: React.FC = () => {
         return <LiveSurveillancePage />;
       case 'incidents':
         return <IncidentsPage />;
+      case 'evidence':
+        return <EvidencePage />;
       case 'sentinel-query':
         return <SentinelQueryPage />;
       case 'enviro-vision':
@@ -75,13 +78,13 @@ export const AppLayout: React.FC = () => {
         <Sidebar />
 
         {/* Dynamic Page Content View */}
-        <main className={`flex-1 min-h-0 flex flex-col ${activePage === 'incidents' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <div className={`w-full px-4 sm:px-6 max-w-[1920px] mx-auto flex-1 ${activePage === 'incidents' ? 'flex flex-col h-full overflow-hidden py-3 min-h-0' : 'py-4 md:py-5 shrink-0'}`}>
+        <main className={`flex-1 min-h-0 flex flex-col ${activePage === 'incidents' || activePage === 'evidence' || activePage === 'sentinel-query' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <div className={`w-full px-4 sm:px-6 max-w-[1920px] mx-auto flex-1 ${activePage === 'incidents' || activePage === 'evidence' || activePage === 'sentinel-query' ? 'flex flex-col h-full overflow-hidden py-3 min-h-0' : 'py-4 md:py-5 shrink-0'}`}>
             {renderActivePage()}
           </div>
 
           {/* ── Official Footer ── */}
-          {activePage !== 'incidents' && <Footer />}
+          {activePage !== 'incidents' && activePage !== 'evidence' && activePage !== 'sentinel-query' && <Footer />}
         </main>
       </div>
 

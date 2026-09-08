@@ -7,6 +7,7 @@ export type PageId =
   | 'command-overview'
   | 'live-surveillance'
   | 'incidents'
+  | 'evidence'
   | 'sentinel-query'
   | 'enviro-vision'
   | 'edge-guard'

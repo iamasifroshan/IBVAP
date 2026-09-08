@@ -149,13 +149,13 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({ incident, onClose 
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-[22px] font-bold text-[#0B1F33] tracking-tight leading-tight">Evidence Record</h2>
+                <h2 className="font-heading text-xl sm:text-2xl font-bold text-[#0B1F33] tracking-tight leading-tight">Evidence Record</h2>
                 <Badge variant={incident.severity}>{incident.severity}</Badge>
               </div>
               <p className="text-[13px] text-slate-400 font-mono mt-1 truncate">
                 ID: {incident.id}
               </p>
-              <div className="flex items-center gap-2 mt-2 text-[14px] text-slate-600 font-medium">
+              <div className="flex items-center gap-2 mt-2 text-[14px] text-slate-600 font-medium font-body">
                 <Camera className="w-4 h-4 text-slate-400 shrink-0" />
                 <span>Captured by <span className="font-bold text-[#0B1F33] font-mono">{incident.cameraName}</span></span>
                 <span className="text-slate-300">•</span>

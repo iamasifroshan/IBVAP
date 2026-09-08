@@ -276,8 +276,8 @@ export const VirtualFencePage: React.FC = () => {
       {/* ── HEADER ──────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-[24px] font-bold text-[#0B1F33] tracking-tight">Zones & Virtual Fence</h1>
-          <p className="text-[14px] text-slate-500 mt-1">
+          <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0B1F33] tracking-tight">Zones & Virtual Fence</h1>
+          <p className="text-[13px] sm:text-[14px] text-slate-500 mt-1 font-body">
             Configure, monitor, and manage restricted surveillance zones and AI-powered virtual fence boundaries.
           </p>
         </div>

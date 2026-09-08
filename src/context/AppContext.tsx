@@ -63,6 +63,7 @@ const PAGE_TO_PATH: Record<PageId, string> = {
   'command-overview': '/',
   'live-surveillance': '/live-surveillance',
   'incidents': '/incidents',
+  'evidence': '/evidence',
   'face-recognition': '/known-persons',
   'analytics': '/analytics',
   'settings': '/settings',

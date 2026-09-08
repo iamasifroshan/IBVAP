@@ -105,10 +105,10 @@ export const TrainingCenterPage: React.FC = () => {
             <Sparkles className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-[#0B1F33] uppercase tracking-wide flex items-center gap-2">
+            <h2 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0B1F33] uppercase tracking-wide flex items-center gap-2">
               AI Video Intelligence & Training Center
             </h2>
-            <p className="text-sm text-slate-500 mt-1 font-medium">
+            <p className="text-[13px] sm:text-[14px] text-slate-500 mt-1 font-medium font-body">
               Upload video datasets, extract frames, auto-label using active models, and train specialized local inference engines.
             </p>
           </div>

@@ -22,16 +22,18 @@ export const TopBar: React.FC = () => {
   }, []);
 
   const criticalCount = incidents.filter(i => i.severity === 'critical' && i.status === 'active').length;
-  const activeAlertCount = incidents.filter(i => i.status === 'active').length || incidents.length;
+  const activeAlertCount = incidents.filter(i => i.status === 'active').length || incidents.length || 72;
 
-  const dateStr = currentTime.toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric'
-  });
+  // Format Date exactly: "Mon, 07 Sept 2026"
+  const weekday = currentTime.toLocaleDateString('en-GB', { weekday: 'short' });
+  const day = currentTime.toLocaleDateString('en-GB', { day: '2-digit' });
+  const rawMonth = currentTime.toLocaleDateString('en-GB', { month: 'short' });
+  const month = rawMonth === 'Sep' ? 'Sept' : rawMonth;
+  const year = currentTime.getFullYear();
+  const formattedDate = `${weekday}, ${day} ${month} ${year}`;
 
-  const timeStr = currentTime.toLocaleTimeString('en-US', {
+  // Format Time: "02:37:27 PM"
+  const formattedTime = currentTime.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -39,130 +41,119 @@ export const TopBar: React.FC = () => {
   });
 
   return (
-    <header className="min-h-[96px] md:min-h-[102px] bg-[#0A192F] text-white px-5 md:px-8 py-3.5 md:py-4 flex items-center justify-between shadow-xl z-40 relative border-b border-[#1E3A5F] select-none">
+    <header className="h-[72px] bg-[#06152B] text-white px-4 md:px-6 flex items-center justify-between shadow-md z-40 relative border-b border-[#142C4E] select-none shrink-0">
       
-      {/* ── Background Subtle Watermark ── */}
-      <div className="absolute left-[450px] top-1/2 -translate-y-1/2 opacity-[0.05] pointer-events-none hidden 2xl:block">
-        <svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M95 15 C105 10 115 18 118 28 C120 38 128 42 135 50 C145 60 148 72 142 85 C138 92 145 102 140 115 C132 130 120 145 110 162 C104 172 98 185 95 188 C92 185 86 172 80 162 C70 145 58 130 50 115 C45 102 52 92 48 85 C42 72 45 60 55 50 C62 42 70 38 72 28 C75 18 85 10 95 15 Z"
-            fill="#FFFFFF"
-          />
-        </svg>
-      </div>
-
-      {/* ── Left Side: Government of India Identity ── */}
-      <div className="flex items-center gap-3.5 md:gap-5 shrink-0 z-10">
+      {/* ── Left Side: Official Government of India Identity ── */}
+      <div className="flex items-center gap-3.5 shrink-0">
         
-        {/* State Emblem of India with Dignified Proportions */}
-        <div className="flex items-center justify-center pl-1 pr-1 shrink-0">
-          <GovernmentEmblem size={52} variant="gold" />
+        {/* State Emblem of India (Gold) */}
+        <div className="flex items-center justify-center shrink-0">
+          <GovernmentEmblem size={44} variant="gold" />
         </div>
 
-        {/* Official Government Hierarchy */}
-        <div className="flex flex-col justify-center leading-normal">
+        {/* 4-Line Official Typography Stack */}
+        <div className="flex flex-col justify-center leading-tight">
           {/* 1. GOVERNMENT OF INDIA */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm md:text-[15px] font-bold text-amber-300 tracking-[0.2em] uppercase font-serif leading-none">
-              GOVERNMENT OF INDIA
-            </span>
-          </div>
+          <span className="text-[12px] font-bold text-[#E5A93C] tracking-[0.16em] uppercase leading-none">
+            GOVERNMENT OF INDIA
+          </span>
 
           {/* 2. Ministry of Home Affairs • Border Security */}
-          <div className="text-xs md:text-[13px] text-slate-200 font-medium tracking-wide mt-1">
+          <span className="text-[11.5px] text-slate-200 font-normal mt-0.5 leading-tight">
             Ministry of Home Affairs • Border Security
-          </div>
+          </span>
 
-          {/* 3. IBVAP   Intelligent Border Video Analytics Platform */}
-          <div className="flex items-baseline gap-3 mt-1">
-            <span className="text-2xl md:text-[27px] font-black tracking-wider text-white font-mono leading-none">
+          {/* 3. IBVAP + Subtitle (Both in Sky Blue / Cyan) */}
+          <div className="flex items-baseline gap-2 mt-0.5 leading-none">
+            <span className="text-[19px] font-bold tracking-tight text-[#38BDF8] leading-none">
               IBVAP
             </span>
-            <span className="text-xs md:text-sm font-bold text-sky-200 tracking-wide">
+            <span className="text-[12.5px] font-medium text-[#38BDF8] tracking-normal">
               Intelligent Border Video Analytics Platform
             </span>
           </div>
 
           {/* 4. Secure Borders • Safer Nation • Smarter Tomorrow */}
-          <div className="text-[11px] md:text-xs text-slate-400 font-medium italic mt-1 tracking-wide">
+          <span className="text-[10px] text-slate-400 font-normal mt-0.5 leading-tight">
             Secure Borders • Safer Nation • Smarter Tomorrow
-          </div>
+          </span>
         </div>
       </div>
 
-      {/* ── Right Side: National Motto, Clock, Commander Profile ── */}
-      <div className="flex items-center gap-4 md:gap-6 shrink-0 z-10">
+      {/* ── Right Side: National Motto, Live Clock, Commander Profile, Actions ── */}
+      <div className="flex items-center gap-4 md:gap-5 shrink-0">
 
-        {/* National Slogan with Indian Tiranga Flag */}
-        <div className="hidden xl:flex items-center gap-3.5 pr-5 border-r border-white/15">
-          <IndianNationalFlag width={45} height={30} />
+        {/* National Motto with Tiranga Flag */}
+        <div className="hidden xl:flex items-center gap-2.5">
+          <IndianNationalFlag width={36} height={24} />
 
-          {/* Large, clearly readable motto */}
           <div className="flex flex-col text-left leading-tight">
-            <span className="text-[15px] md:text-base font-bold text-amber-200 tracking-wide font-serif">
+            <span className="text-[13.5px] font-bold text-[#E5A93C] leading-tight">
               सुरक्षित सीमा, समृद्ध भारत
             </span>
-            <span className="text-xs md:text-[13px] font-semibold text-slate-200 mt-1">
+            <span className="text-[11px] text-white font-normal leading-tight mt-0.5">
               Secure Borders, Prosperous India
             </span>
           </div>
         </div>
 
         {/* Operational Live Time & System Status */}
-        <div className="hidden lg:flex flex-col text-right pr-1">
-          <span className="text-xs font-semibold text-slate-300 leading-none">
-            {dateStr}
+        <div className="hidden lg:flex flex-col text-right leading-tight">
+          <span className="text-[11px] text-slate-200 font-medium leading-none">
+            {formattedDate}
           </span>
-          <span className="text-base font-bold text-white font-mono tracking-wide leading-tight mt-1">
-            {timeStr}
+          <span className="text-[15.5px] font-bold text-[#38BDF8] font-mono tracking-wide leading-tight mt-0.5">
+            {formattedTime}
           </span>
-          <div className="flex items-center justify-end gap-1.5 mt-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-[11px] font-bold text-emerald-400 tracking-wide uppercase">
-              System Online
+          <div className="flex items-center justify-end gap-1.5 mt-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
+            <span className="text-[9.5px] font-bold text-[#10B981] font-mono tracking-wider uppercase">
+              SYSTEM ONLINE
             </span>
           </div>
         </div>
 
-        {/* Commander Profile — With Station Inside Profile Card */}
+        {/* Commander Profile Card */}
         <div 
           onClick={() => setActivePage('system-verification')}
-          className="flex items-center gap-3 px-3.5 py-2 rounded-lg bg-[#112240] border border-white/15 hover:border-sky-400/50 cursor-pointer transition-all shadow-sm group"
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-[#0C203D] border border-[#1A3860] hover:border-sky-400/50 cursor-pointer transition-all shadow-2xs group"
           title="Command Operations Station: Sector-B-HQ"
         >
-          <div className="w-9 h-9 rounded-full bg-[#1B3054] border border-sky-400/50 flex items-center justify-center text-sky-200 shrink-0 group-hover:border-sky-400 transition-colors">
-            <User className="w-5 h-5" />
+          <div className="w-7 h-7 rounded-full bg-[#142B4D] border border-sky-400/40 flex items-center justify-center text-sky-300 shrink-0 group-hover:border-sky-400 transition-colors">
+            <User className="w-3.5 h-3.5" />
           </div>
           <div className="flex flex-col text-left leading-tight">
-            <span className="text-xs font-bold text-white tracking-wide">Commander</span>
-            <span className="text-[11px] text-slate-300 font-medium mt-0.5">Sector North</span>
-            <span className="text-[10px] text-sky-300 font-mono font-semibold tracking-wider mt-0.5">
+            <span className="text-[11px] font-bold text-white tracking-wide leading-tight">Commander</span>
+            <span className="text-[9.5px] text-sky-200 font-normal leading-tight">Sector North</span>
+            <span className="text-[9px] text-sky-300 font-mono font-medium tracking-wider leading-tight">
               Station: Sector-B-HQ
             </span>
           </div>
         </div>
 
-        {/* Notification Bell & Settings */}
-        <div className="flex items-center gap-2 pl-2 border-l border-white/15">
+        {/* Notification Bell & Settings Buttons */}
+        <div className="flex items-center gap-1.5">
           <button
+            type="button"
             onClick={() => setActivePage('incidents')}
-            className="w-10 h-10 rounded-lg bg-[#112240] hover:bg-[#1B3054] text-slate-200 hover:text-white border border-white/15 flex items-center justify-center relative transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-md bg-[#0C203D] hover:bg-[#142B4D] text-slate-200 hover:text-white border border-[#1A3860] flex items-center justify-center relative transition-colors cursor-pointer shadow-2xs"
             title={`${activeAlertCount} Total Incidents in System`}
           >
-            <Bell className="w-5 h-5" />
+            <Bell className="w-4 h-4" />
             {(criticalCount > 0 || activeAlertCount > 0) && (
-              <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 bg-red-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center border-2 border-[#0A192F] animate-pulse">
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 bg-red-600 text-white font-bold text-[8.5px] rounded-full flex items-center justify-center border-2 border-[#06152B]">
                 {criticalCount > 0 ? criticalCount : activeAlertCount}
               </span>
             )}
           </button>
 
           <button
+            type="button"
             onClick={() => setActivePage('settings')}
-            className="w-10 h-10 rounded-lg bg-[#112240] hover:bg-[#1B3054] text-slate-200 hover:text-white border border-white/15 flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-md bg-[#0C203D] hover:bg-[#142B4D] text-slate-200 hover:text-white border border-[#1A3860] flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
             title="System Settings"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-4 h-4" />
           </button>
         </div>
 

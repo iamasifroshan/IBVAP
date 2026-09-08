@@ -99,17 +99,22 @@ export const SystemSettingsPage: React.FC = () => {
       {/* ==================================================
           2. SETTINGS PAGE HEADER
           ================================================== */}
-      <div className="p-3.5 sm:px-5 sm:py-3.5 bg-white border border-slate-200/90 shadow-2xs rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#0F2742]/5 border border-[#0F2742]/10 flex items-center justify-center text-[#1F5F8B] shrink-0">
-            <Settings className="w-4.5 h-4.5" />
+      <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-[#1F5F8B] shrink-0">
+            <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg sm:text-[20px] font-bold text-[#0F2742] tracking-wide uppercase">
-              IBVAP SYSTEM SETTINGS
-            </h1>
-            <p className="text-xs text-slate-500">
-              Configure AI inference, alert rules, storage and backend connection.
+            <div className="flex items-center gap-2">
+              <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0F2742] tracking-tight">
+                System Settings
+              </h1>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 font-mono">
+                Active Node
+              </span>
+            </div>
+            <p className="text-[13px] sm:text-[14px] text-slate-500 mt-0.5 font-body">
+              Core platform configuration, edge inference endpoints, analytical thresholds, and data lifecycle management.
             </p>
           </div>
         </div>

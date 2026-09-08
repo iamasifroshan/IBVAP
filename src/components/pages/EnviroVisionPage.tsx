@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  CloudFog, Sun, Moon, ShieldAlert, Settings2, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle
+  CloudFog, Sun, Moon, ShieldAlert, Settings2, ChevronDown, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { EnvironmentCondition } from '../../types';
@@ -9,17 +9,111 @@ export const EnviroVisionPage: React.FC = () => {
   const { environment, setEnvironment, cameras } = useApp();
   const [showTechnical, setShowTechnical] = useState(false);
 
-  const envModes: { id: EnvironmentCondition; label: string; desc: string; icon: React.ReactNode; reliabilityImpact: string }[] = [
-    { id: 'normal', label: 'Normal Daytime', desc: 'Clear weather conditions; optimal baseline AI precision', icon: <Sun className="w-5 h-5 text-amber-500" />, reliabilityImpact: '95-100% AI Confidence' },
-    { id: 'night', label: 'Night Mode', desc: 'Thermal IR active; night vision enhancement enabled', icon: <Moon className="w-5 h-5 text-indigo-500" />, reliabilityImpact: '80-90% AI Confidence' },
-    { id: 'low_light', label: 'Low Light Twilight', desc: 'Dusk/Dawn low contrast; auto contrast boost enabled', icon: <Sun className="w-5 h-5 text-yellow-600" />, reliabilityImpact: '75-85% AI Confidence' },
-    { id: 'cloudy', label: 'Overcast Daylight', desc: 'Moderate light reduction; standard AI confidence', icon: <CloudFog className="w-5 h-5 text-slate-500" />, reliabilityImpact: '85-92% AI Confidence' },
-    { id: 'fog', label: 'Moderate Fog', desc: 'Atmospheric degradation; dehaze AI filters activated', icon: <CloudFog className="w-5 h-5 text-[#1F5F8B]" />, reliabilityImpact: '55-68% AI Confidence' },
-    { id: 'severe_fog', label: 'Severe Fog Warning', desc: 'Visibility < 30%; secondary human verification mandatory', icon: <ShieldAlert className="w-5 h-5 text-[#D92D20]" />, reliabilityImpact: '35-45% AI Confidence' },
-    { id: 'dust', label: 'Dust / Sandstorm', desc: 'Particulate obstruction; high noise filtering active', icon: <CloudFog className="w-5 h-5 text-amber-600" />, reliabilityImpact: '45-55% AI Confidence' }
+  const envModes: {
+    id: EnvironmentCondition;
+    label: string;
+    desc: string;
+    icon: React.ReactNode;
+    reliabilityImpact: string;
+    bgClass: string;
+    borderClass: string;
+    activeClass: string;
+    iconBg: string;
+    accentColor: string;
+    badgeStyle: string;
+  }[] = [
+    { 
+      id: 'normal', 
+      label: 'Normal Daytime', 
+      desc: 'Clear weather conditions; optimal baseline AI precision', 
+      icon: <Sun className="w-5 h-5 text-amber-500" />, 
+      reliabilityImpact: '95-100% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-amber-50/70 via-sky-50/30 to-white',
+      borderClass: 'border-amber-200/80 hover:border-amber-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-amber-500 border-amber-500 bg-amber-50/90 shadow-md',
+      iconBg: 'bg-amber-100 text-amber-600 border border-amber-200/90 shadow-2xs',
+      accentColor: 'text-amber-950',
+      badgeStyle: 'bg-emerald-100/80 text-emerald-800 border-emerald-200'
+    },
+    { 
+      id: 'night', 
+      label: 'Night Mode', 
+      desc: 'Thermal IR active; night vision enhancement enabled', 
+      icon: <Moon className="w-5 h-5 text-indigo-500" />, 
+      reliabilityImpact: '80-90% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-indigo-50/90 via-slate-50/70 to-purple-50/50',
+      borderClass: 'border-indigo-200/80 hover:border-indigo-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-indigo-600 border-indigo-600 bg-indigo-50/95 shadow-md',
+      iconBg: 'bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs',
+      accentColor: 'text-indigo-950',
+      badgeStyle: 'bg-indigo-100/80 text-indigo-800 border-indigo-200'
+    },
+    { 
+      id: 'low_light', 
+      label: 'Low Light Twilight', 
+      desc: 'Dusk/Dawn low contrast; auto contrast boost enabled', 
+      icon: <Sun className="w-5 h-5 text-orange-600" />, 
+      reliabilityImpact: '75-85% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-rose-50/40',
+      borderClass: 'border-orange-200/80 hover:border-orange-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-orange-500 border-orange-500 bg-orange-50/95 shadow-md',
+      iconBg: 'bg-orange-100 text-orange-600 border border-orange-200 shadow-2xs',
+      accentColor: 'text-orange-950',
+      badgeStyle: 'bg-orange-100/80 text-orange-800 border-orange-200'
+    },
+    { 
+      id: 'cloudy', 
+      label: 'Overcast Daylight', 
+      desc: 'Moderate light reduction; standard AI confidence', 
+      icon: <CloudFog className="w-5 h-5 text-slate-600" />, 
+      reliabilityImpact: '85-92% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-slate-100/90 via-blue-50/30 to-slate-50',
+      borderClass: 'border-slate-300/80 hover:border-slate-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-slate-600 border-slate-600 bg-slate-100 shadow-md',
+      iconBg: 'bg-slate-200/80 text-slate-700 border border-slate-300 shadow-2xs',
+      accentColor: 'text-slate-900',
+      badgeStyle: 'bg-slate-200/80 text-slate-700 border-slate-300'
+    },
+    { 
+      id: 'fog', 
+      label: 'Moderate Fog', 
+      desc: 'Atmospheric degradation; dehaze AI filters activated', 
+      icon: <CloudFog className="w-5 h-5 text-teal-600" />, 
+      reliabilityImpact: '55-68% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-teal-50/80 via-cyan-50/50 to-sky-50/40',
+      borderClass: 'border-teal-200 hover:border-teal-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-teal-600 border-teal-600 bg-teal-50/95 shadow-md',
+      iconBg: 'bg-teal-100 text-teal-700 border border-teal-200 shadow-2xs',
+      accentColor: 'text-teal-950',
+      badgeStyle: 'bg-teal-100/80 text-teal-800 border-teal-200'
+    },
+    { 
+      id: 'severe_fog', 
+      label: 'Severe Fog Warning', 
+      desc: 'Visibility < 30%; secondary human verification mandatory', 
+      icon: <ShieldAlert className="w-5 h-5 text-red-600" />, 
+      reliabilityImpact: '35-45% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-red-50/90 via-rose-50/50 to-amber-50/30',
+      borderClass: 'border-red-200 hover:border-red-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-red-600 border-red-600 bg-red-50/95 shadow-md',
+      iconBg: 'bg-red-100 text-red-600 border border-red-200 shadow-2xs animate-pulse',
+      accentColor: 'text-red-950',
+      badgeStyle: 'bg-red-100 text-red-700 border-red-200 font-bold'
+    },
+    { 
+      id: 'dust', 
+      label: 'Dust / Sandstorm', 
+      desc: 'Particulate obstruction; high noise filtering active', 
+      icon: <CloudFog className="w-5 h-5 text-amber-700" />, 
+      reliabilityImpact: '45-55% AI Confidence',
+      bgClass: 'bg-gradient-to-br from-amber-100/60 via-yellow-50/70 to-orange-50/50',
+      borderClass: 'border-amber-300/90 hover:border-amber-400 hover:shadow-md',
+      activeClass: 'ring-2 ring-amber-600 border-amber-600 bg-amber-50/95 shadow-md',
+      iconBg: 'bg-amber-200/70 text-amber-800 border border-amber-300 shadow-2xs',
+      accentColor: 'text-amber-950',
+      badgeStyle: 'bg-amber-100 text-amber-800 border-amber-300'
+    }
   ];
-
-  const degradedCameraCount = cameras.filter(c => c.aiReliability < 60).length;
 
   return (
     <div className="space-y-[24px] max-w-[1400px]">
@@ -31,10 +125,10 @@ export const EnviroVisionPage: React.FC = () => {
             <CloudFog className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-[28px] font-semibold text-[var(--primary-navy)] leading-tight">
+            <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[var(--primary-navy)] leading-tight">
               EnviroVision AI
             </h1>
-            <p className="text-[15px] text-[var(--text-muted)] mt-1">
+            <p className="text-[13px] sm:text-[14px] text-[var(--text-muted)] mt-1 font-body">
               Atmospheric Adaptation Engine. Adjusts AI confidence based on environmental physics.
             </p>
           </div>
@@ -47,45 +141,55 @@ export const EnviroVisionPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. CRITICAL PHYSICS LIMIT & UNCERTAINTY WARNING */}
-      {(environment === 'fog' || environment === 'severe_fog' || environment === 'dust' || degradedCameraCount > 0) && (
-        <div className="bg-red-50 border border-[#D92D20]/30 rounded-lg p-[20px] flex items-start gap-4">
-          <AlertTriangle className="w-6 h-6 text-[#D92D20] shrink-0 mt-0.5" />
+      {/* 3. MAIN SUMMARY (Environment Selector) */}
+      <div className="bg-white border border-[var(--border-color)] rounded-xl shadow-2xs overflow-hidden">
+        <div className="px-[20px] py-[16px] border-b border-[var(--border-color)] bg-slate-50/70 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-[#D92D20] uppercase tracking-wider">
-              Environmental Degradation Detected ({degradedCameraCount} Feeds Affected)
-            </h3>
-            <p className="text-[15px] text-[#D92D20]/80 mt-1">
-              Atmospheric particles reduce physical photon transmission. EnviroVision penalizes AI reliability scores dynamically and enforces secondary human verification.
+            <h2 className="font-heading text-base sm:text-lg font-bold text-[var(--primary-navy)]">
+              Operating Environment Simulation Mode
+            </h2>
+            <p className="text-xs text-slate-500 font-body mt-0.5">
+              Select environmental conditions to trigger real-time physics degradation and confidence recalculation.
             </p>
           </div>
-        </div>
-      )}
-
-      {/* 3. MAIN SUMMARY (Environment Selector) */}
-      <div className="bg-white border border-[var(--border-color)] rounded-lg shadow-sm">
-        <div className="px-[20px] py-[16px] border-b border-[var(--border-color)] bg-slate-50/50">
-          <h2 className="text-lg font-semibold text-[var(--primary-navy)]">Operating Environment Simulation Mode</h2>
+          <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded bg-slate-100 text-slate-700 border border-slate-200">
+            {envModes.length} PROFILES
+          </span>
         </div>
         <div className="p-[20px]">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[20px]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[18px]">
             {envModes.map((mode) => {
               const isSelected = environment === mode.id;
               return (
                 <div
                   key={mode.id}
                   onClick={() => setEnvironment(mode.id)}
-                  className={`p-4 rounded-lg border cursor-pointer transition-all flex flex-col justify-between h-full min-h-[140px] ${
-                    isSelected ? 'bg-[#1F5F8B]/5 border-[#1F5F8B] shadow-sm' : 'bg-white border-[var(--border-color)] hover:border-slate-300'
+                  className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 flex flex-col justify-between h-full min-h-[155px] shadow-2xs hover:shadow-md hover:-translate-y-0.5 ${
+                    isSelected ? mode.activeClass : `${mode.bgClass} ${mode.borderClass}`
                   }`}
                 >
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="p-2 rounded bg-slate-50 border border-slate-100">{mode.icon}</div>
-                    {isSelected && <CheckCircle2 className="w-5 h-5 text-[#1F5F8B]" />}
-                  </div>
                   <div>
-                    <h4 className={`text-sm font-semibold mb-1 ${isSelected ? 'text-[#1F5F8B]' : 'text-[var(--primary-navy)]'}`}>{mode.label}</h4>
-                    <p className="text-[13px] text-[var(--text-muted)] line-clamp-2">{mode.desc}</p>
+                    <div className="flex justify-between items-start mb-2.5">
+                      <div className={`p-2 rounded-lg border shadow-2xs ${mode.iconBg}`}>
+                        {mode.icon}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-2 py-0.5 rounded text-[10.5px] font-bold font-mono border ${mode.badgeStyle}`}>
+                          {mode.reliabilityImpact.split(' ')[0]}
+                        </span>
+                        {isSelected && <CheckCircle2 className="w-5 h-5 text-[#1F5F8B] shrink-0" />}
+                      </div>
+                    </div>
+                    <h4 className={`text-sm font-bold mb-1 font-heading ${isSelected ? 'text-[#1F5F8B]' : mode.accentColor}`}>
+                      {mode.label}
+                    </h4>
+                    <p className="text-xs text-slate-600 leading-relaxed line-clamp-2 font-body">
+                      {mode.desc}
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-black/5 flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-slate-400 font-medium">Confidence:</span>
+                    <span className="font-semibold text-slate-700">{mode.reliabilityImpact}</span>
                   </div>
                 </div>
               );

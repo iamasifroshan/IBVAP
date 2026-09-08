@@ -522,14 +522,14 @@ export const FaceRecognitionPage: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-xl font-bold text-[#0F2742] tracking-tight">
+              <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0F2742] tracking-tight">
                 Face Recognition / Known Persons
               </h1>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#1F5F8B] border border-blue-200">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#1F5F8B] border border-blue-200 font-mono">
                 Official Vault
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-[13px] sm:text-[14px] text-slate-500 mt-0.5 font-body">
               Register, manage, and verify biometric profiles of authorized border guards, outpost personnel, and known targets.
             </p>
           </div>

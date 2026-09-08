@@ -43,13 +43,13 @@ export const ExplainableThreatModal: React.FC<ExplainableThreatModalProps> = ({ 
           <div className="flex items-center gap-4">
             <ShieldAlert className="w-6 h-6 text-[#005EA8]" />
             <div>
-              <h2 className="text-lg font-bold text-[#0B1F33] tracking-wide uppercase flex items-center gap-3">
+              <h2 className="font-heading text-lg sm:text-xl font-bold text-[#0B1F33] tracking-wide uppercase flex items-center gap-3">
                 BorderThreat Engine — Mathematical Audit
-                <span className="px-2.5 py-0.5 bg-blue-50 text-[#005EA8] text-[10px] rounded-full border border-blue-200 font-bold">
+                <span className="px-2.5 py-0.5 bg-blue-50 text-[#005EA8] text-[10px] rounded-full border border-blue-200 font-mono font-bold">
                   EXPLAINABLE AI
                 </span>
               </h2>
-              <p className="text-sm text-slate-500 mt-1">
+              <p className="text-[13px] text-slate-500 mt-1 font-body">
                 Incident ID: <strong className="text-slate-800 font-mono">{incident.id}</strong> | Sector: {incident.sector} ({incident.cameraName})
               </p>
             </div>

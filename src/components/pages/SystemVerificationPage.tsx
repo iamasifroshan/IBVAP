@@ -114,14 +114,18 @@ export const SystemVerificationPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="p-5 bg-white border border-slate-200 shadow-sm rounded-lg flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-3 rounded-full bg-blue-50 text-[#005EA8]">
+      <div className="flex items-center justify-between p-5 bg-white border border-slate-200 shadow-sm rounded-lg">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded bg-[#005EA8]/10 flex items-center justify-center text-[#005EA8]">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-[#0B1F33] tracking-wide uppercase">System Verification</h1>
-            <p className="text-slate-500 text-sm mt-1 font-medium">Automated End-to-End Test Suite</p>
+            <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0B1F33] uppercase tracking-wide">
+              Full System Integrity Verification
+            </h1>
+            <p className="text-[13px] sm:text-[14px] text-slate-500 mt-1 font-body">
+              Automated end-to-end audit of all backend microservices, camera pipelines, AI models, and local databases.
+            </p>
           </div>
         </div>
         <button

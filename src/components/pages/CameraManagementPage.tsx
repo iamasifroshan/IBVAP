@@ -73,10 +73,10 @@ export const CameraManagementPage: React.FC = () => {
       
       <div className="flex items-center justify-between p-5 bg-white border border-slate-200 shadow-sm rounded-lg">
         <div>
-          <h1 className="text-lg font-bold text-[#0B1F33] uppercase tracking-wide flex items-center gap-3">
+          <h1 className="font-heading text-xl sm:text-2xl lg:text-[28px] font-bold text-[#0B1F33] uppercase tracking-wide flex items-center gap-3">
             <CameraIcon className="w-6 h-6 text-[#005EA8]" /> Camera Management
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Configure physical and simulated camera feeds for the backend processing pipeline.</p>
+          <p className="text-[13px] sm:text-[14px] text-slate-500 mt-1 font-body">Configure physical and simulated camera feeds for the backend processing pipeline.</p>
         </div>
       </div>
 

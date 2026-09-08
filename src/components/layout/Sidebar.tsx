@@ -12,6 +12,7 @@ import {
   Settings,
   Zap,
   UserCheck,
+  FileCheck,
   X,
   Menu,
   MoreHorizontal
@@ -45,6 +46,7 @@ export const Sidebar: React.FC = () => {
     { id: 'command-overview', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
     { id: 'live-surveillance', label: 'Live Surveillance', icon: <Video className="w-5 h-5" /> },
     { id: 'incidents', label: 'Incidents', icon: <ShieldAlert className="w-5 h-5" />, badge: activeAlertCount > 0 ? activeAlertCount : undefined },
+    { id: 'evidence', label: 'Evidence Vault', icon: <FileCheck className="w-5 h-5" /> },
     { id: 'face-recognition', label: 'Known Persons', icon: <UserCheck className="w-5 h-5" /> },
     { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-5 h-5" /> },
     { id: 'settings', label: 'Settings', icon: <Settings className="w-5 h-5" /> }
@@ -135,9 +137,9 @@ export const Sidebar: React.FC = () => {
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
                   title={!sidebarOpen ? item.label : undefined}
-                  className={`w-full flex items-center rounded-lg transition-all duration-150 relative ${
+                  className={`w-full flex items-center rounded-lg transition-all duration-150 relative font-body ${
                     sidebarOpen
-                      ? 'px-3 h-10 justify-between text-[13px] font-semibold'
+                      ? 'px-3 h-10 justify-between text-[14px] font-semibold'
                       : 'w-10 h-10 mx-auto justify-center'
                   } ${
                     isActive
@@ -194,9 +196,9 @@ export const Sidebar: React.FC = () => {
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
                   title={!sidebarOpen ? item.label : undefined}
-                  className={`w-full flex items-center rounded-lg transition-all duration-150 relative ${
+                  className={`w-full flex items-center rounded-lg transition-all duration-150 relative font-body ${
                     sidebarOpen
-                      ? 'px-3 h-9 justify-between text-xs font-semibold'
+                      ? 'px-3 h-9 justify-between text-[13px] font-semibold'
                       : 'w-10 h-9 mx-auto justify-center'
                   } ${
                     isActive

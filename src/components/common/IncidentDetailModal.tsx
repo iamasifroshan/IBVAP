@@ -67,23 +67,28 @@ export const IncidentDetailModal: React.FC<Props> = ({ incident, onClose }) => {
         {/* Header */}
         <div className="px-6 py-4 bg-[#0A192F] text-white flex items-center justify-between border-b border-slate-700 shrink-0">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-              isCritical ? 'bg-red-600 text-white' : isHigh ? 'bg-amber-500 text-black' : 'bg-sky-500 text-white'
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+              isCritical ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+              isHigh ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+              'bg-sky-500/20 text-sky-400 border border-sky-500/30'
             }`}>
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold tracking-wide uppercase font-mono text-white">
-                  INCIDENT DETAILS
+                <h2 className="font-heading text-lg sm:text-xl font-bold text-white tracking-wide uppercase">
+                  INCIDENT INVESTIGATION DOSSIER
                 </h2>
-                <span className="text-slate-400">•</span>
-                <span className="text-xs font-mono text-sky-300 font-bold">
-                  {(incident as any).incidentId || incident.id}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider ${
+                  isCritical ? 'bg-red-500 text-white' :
+                  isHigh ? 'bg-amber-500 text-slate-900' :
+                  'bg-sky-500 text-white'
+                }`}>
+                  [{incident.severity?.toUpperCase()}]
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300">
-                Official Border Security Intelligence & Evidence Capture
+              <p className="text-[12px] sm:text-[13px] text-slate-300 font-medium font-body mt-0.5">
+                Ref: <strong className="font-mono text-sky-300">{incident.id}</strong> • Sector: {incident.sector} • Camera: {incident.cameraName || incident.cameraId}
               </p>
             </div>
           </div>

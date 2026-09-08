@@ -31,37 +31,44 @@ export const BorderOverviewMap: React.FC<Props> = ({
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-300 shadow-sm flex flex-col overflow-hidden transition-all">
+    <div className="bg-white rounded-lg border border-slate-300 shadow-xs flex flex-col overflow-hidden transition-all">
       {/* ── Panel Header ── */}
-      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-slate-50 to-white shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-sky-100 text-[#0F2742] flex items-center justify-center border border-sky-300">
-            <Layers className="w-5 h-5 text-sky-800" />
+      <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-md bg-sky-100 text-[#0F2742] flex items-center justify-center border border-sky-300 shrink-0">
+            <Layers className="w-3.5 h-3.5 text-sky-800" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-[#0F2742] tracking-tight">BORDER OVERVIEW MAP</h2>
-            <p className="text-xs text-slate-500 font-medium">Geospatial tactical grid, sector perimeters & intrusion radar</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs sm:text-sm font-bold text-[#0F2742] tracking-tight uppercase">
+                BORDER OVERVIEW MAP
+              </h2>
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold tracking-wider uppercase bg-emerald-100 text-emerald-800 font-mono">
+                ACTIVE
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 font-medium">Geospatial tactical grid, sector perimeters & intrusion radar</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:inline-flex text-xs font-mono font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-md border border-slate-300">
+        <div className="flex items-center gap-2">
+          <span className="hidden sm:inline-flex text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-300">
             SECTOR B • 34°18'42"N 74°22'18"E
           </span>
           <button 
             onClick={() => setShowLayers(prev => !prev)}
-            className={`p-2 rounded-lg border transition-colors ${
+            className={`p-1.5 rounded border transition-colors ${
               showLayers ? 'bg-sky-50 text-sky-700 border-sky-300' : 'text-slate-500 border-slate-200 hover:bg-slate-100'
             }`}
             title="Toggle Map Overlay Layers"
           >
-            <Layers className="w-4 h-4" />
+            <Layers className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* ── Map Canvas Surface (Generous Vertical Height: 380px) ── */}
-      <div className="relative w-full h-[380px] bg-[#14261C] overflow-hidden select-none">
+      {/* ── Map Canvas Surface (Responsive Height: 380px mobile / 540px desktop) ── */}
+      <div className="relative w-full h-[380px] xl:h-[540px] bg-[#14261C] overflow-hidden select-none">
         
         {/* Topographic Satellite Terrain Base */}
         <div 
@@ -76,7 +83,7 @@ export const BorderOverviewMap: React.FC<Props> = ({
                 <stop offset="100%" stopColor="#0E1F15" />
               </linearGradient>
               <filter id="borderGlow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feGaussianBlur stdDeviation="3" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
                   <feMergeNode in="SourceGraphic" />
@@ -93,109 +100,96 @@ export const BorderOverviewMap: React.FC<Props> = ({
               height="500" 
               preserveAspectRatio="xMidYMid slice" 
             />
-            {/* Subtle geospatial contrast tint so tactical overlays remain clearly readable */}
-            <rect width="1000" height="500" fill="#0A160F" opacity="0.2" />
+            {/* Minimal tint so satellite imagery is visually dominant */}
+            <rect width="1000" height="500" fill="#0A160F" opacity="0.12" />
 
-            {/* Subtle Topographic Contour Lines for Geographic Elevation Texture */}
-            <path d="M0,90 Q300,30 600,100 T1000,70" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
-            <path d="M0,170 Q320,110 650,180 T1000,140" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
-            <path d="M0,250 Q280,190 620,260 T1000,220" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
-            <path d="M0,330 Q260,270 580,340 T1000,300" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.3" />
+            {/* Subtle Topographic Elevation Contour Lines */}
+            <path d="M0,90 Q300,30 600,100 T1000,70" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.25" />
+            <path d="M0,170 Q320,110 650,180 T1000,140" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.25" />
+            <path d="M0,250 Q280,190 620,260 T1000,220" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.25" />
+            <path d="M0,330 Q260,270 580,340 T1000,300" fill="none" stroke="#527A5E" strokeWidth="0.8" strokeDasharray="4,4" opacity="0.25" />
 
             {/* Sector Boundary Lines */}
-            <line x1="250" y1="0" x2="250" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.35" />
-            <line x1="550" y1="0" x2="550" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.35" />
-            <line x1="800" y1="0" x2="800" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.35" />
+            <line x1="250" y1="0" x2="250" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.3" />
+            <line x1="550" y1="0" x2="550" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.3" />
+            <line x1="800" y1="0" x2="800" y2="500" stroke="#38BDF8" strokeWidth="1" strokeDasharray="6,6" opacity="0.3" />
 
             {/* Sector Labels */}
-            <text x="120" y="40" fill="#38BDF8" opacity="0.5" fontSize="12" fontWeight="bold" fontFamily="monospace">SECTOR A</text>
-            <text x="390" y="40" fill="#38BDF8" opacity="0.5" fontSize="12" fontWeight="bold" fontFamily="monospace">SECTOR B (ACTIVE)</text>
-            <text x="670" y="40" fill="#38BDF8" opacity="0.5" fontSize="12" fontWeight="bold" fontFamily="monospace">SECTOR C</text>
-            <text x="890" y="40" fill="#38BDF8" opacity="0.5" fontSize="12" fontWeight="bold" fontFamily="monospace">SECTOR D</text>
+            <text x="120" y="36" fill="#38BDF8" opacity="0.5" fontSize="11" fontWeight="bold" fontFamily="monospace">SECTOR A</text>
+            <text x="390" y="36" fill="#38BDF8" opacity="0.5" fontSize="11" fontWeight="bold" fontFamily="monospace">SECTOR B (ACTIVE)</text>
+            <text x="670" y="36" fill="#38BDF8" opacity="0.5" fontSize="11" fontWeight="bold" fontFamily="monospace">SECTOR C</text>
+            <text x="890" y="36" fill="#38BDF8" opacity="0.5" fontSize="11" fontWeight="bold" fontFamily="monospace">SECTOR D</text>
 
             {/* National Border Line (Yellow Dotted Line) */}
             <path 
               d="M380,0 C420,110 370,180 430,260 C460,320 420,400 450,500" 
               fill="none" 
               stroke="#FACC15" 
-              strokeWidth="3.5" 
+              strokeWidth="3" 
               strokeDasharray="8,5"
               filter="url(#borderGlow)"
             />
 
             {/* High Exclusion Restricted Buffer Zone Polygon */}
-            <polygon points="360,0 450,0 490,500 390,500" fill="#FACC15" fillOpacity="0.05" />
+            <polygon points="360,0 450,0 490,500 390,500" fill="#FACC15" fillOpacity="0.04" />
           </svg>
         </div>
 
-        {/* ── Top-Left Professional Legend ── */}
+        {/* ── Top-Left Compact Operational Legend ── */}
         {showLayers && (
-          <div className="absolute top-4 left-4 bg-[#0A192F]/90 backdrop-blur-md border border-white/20 rounded-xl p-3 text-xs text-slate-100 z-20 shadow-xl flex flex-col gap-2 min-w-[170px] pointer-events-none">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/10 pb-1 font-mono">
-              MAP TELEMETRY
+          <div className="absolute top-2.5 left-2.5 bg-[#0A192F]/88 backdrop-blur-sm border border-white/15 rounded-md p-2 text-[10px] text-slate-100 z-20 shadow-md flex flex-col gap-1 min-w-[130px] pointer-events-none">
+            <div className="text-[8px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/10 pb-0.5 font-mono flex items-center justify-between">
+              <span>MAP TELEMETRY</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500/30 border border-emerald-400 flex items-center justify-center text-emerald-300">
-                <Camera className="w-2 h-2" />
-              </span>
-              <span className="font-medium">Camera Online</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white/70 shrink-0" />
+              <span className="text-[9px] text-slate-200">Camera Online</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded-full bg-red-500/30 border border-red-400 flex items-center justify-center text-red-300">
-                <Camera className="w-2 h-2" />
-              </span>
-              <span className="font-medium">Camera Offline</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 border border-white/70 shrink-0" />
+              <span className="text-[9px] text-slate-200">Camera Offline</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded bg-red-600 flex items-center justify-center text-white font-bold text-[9px]">
-                ▲
-              </span>
-              <span className="font-medium">Incident High</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-xs bg-red-600 flex items-center justify-center text-white font-bold text-[7px] shrink-0">▲</span>
+              <span className="text-[9px] text-slate-200">Incident High</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded bg-amber-500 flex items-center justify-center text-black font-bold text-[9px]">
-                ▲
-              </span>
-              <span className="font-medium">Incident Medium</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 flex items-center justify-center text-black font-bold text-[7px] shrink-0">▲</span>
+              <span className="text-[9px] text-slate-200">Incident Med/Low</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded bg-sky-500 flex items-center justify-center text-white font-bold text-[9px]">
-                ▲
-              </span>
-              <span className="font-medium">Incident Low</span>
-            </div>
-            <div className="flex items-center gap-2 pt-1 border-t border-white/10">
-              <span className="w-5 h-1 bg-yellow-400 rounded-sm"></span>
-              <span className="font-medium text-yellow-300">Border Line</span>
+            <div className="flex items-center gap-1.5 pt-0.5 border-t border-white/10">
+              <span className="w-3 h-0.5 bg-yellow-400 rounded-xs shrink-0"></span>
+              <span className="text-[9px] font-semibold text-yellow-300">Border Line</span>
             </div>
           </div>
         )}
 
-        {/* ── Active Incident Radar Ring in Center ── */}
+        {/* ── Active Incident Breach Radar Ring in Center (Visually Dominant) ── */}
         <div 
           onClick={() => onSelectIncident && incidents.length > 0 && onSelectIncident(incidents[0])}
           className="absolute left-[48%] top-[45%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="absolute -inset-14 rounded-full border border-red-500/30 bg-red-500/10 animate-ping opacity-60"></div>
-          <div className="absolute -inset-8 rounded-full border border-red-500/60 bg-red-500/20 animate-pulse"></div>
-          <div className="relative w-10 h-10 rounded-full bg-red-600 border-2 border-white shadow-[0_0_20px_rgba(239,68,68,1)] flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <AlertTriangle className="w-5 h-5" />
+          <div className="absolute -inset-12 rounded-full border border-red-500/40 bg-red-500/15 animate-ping opacity-60"></div>
+          <div className="absolute -inset-6 rounded-full border border-red-500/70 bg-red-500/20 animate-pulse"></div>
+          <div className="relative w-9 h-9 rounded-full bg-red-600 border-2 border-white shadow-[0_0_15px_rgba(239,68,68,0.9)] flex items-center justify-center text-white group-hover:scale-110 transition-transform">
+            <AlertTriangle className="w-4 h-4" />
           </div>
-          <div className="absolute top-11 -left-16 bg-black/90 backdrop-blur-md text-white border border-red-500 text-[10px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap">
+          <div className="absolute top-10 -left-16 bg-[#0A192F]/95 text-white border border-red-500 text-[9px] font-bold px-2 py-0.5 rounded shadow whitespace-nowrap">
             BREACH ALERT: Sector B-04
           </div>
         </div>
 
-        {/* ── Interactive Camera Markers ── */}
+        {/* ── Interactive Camera Markers (Sleek & Unobtrusive) ── */}
         {/* Cam 1: North West */}
         <div 
           onClick={() => onSelectCamera && cameras.length > 0 && onSelectCamera(cameras[0])}
           className="absolute left-[28%] top-[26%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             BORDER-CAM-07 (Online)
           </div>
         </div>
@@ -205,10 +199,10 @@ export const BorderOverviewMap: React.FC<Props> = ({
           onClick={() => onSelectCamera && cameras.length > 1 && onSelectCamera(cameras[1])}
           className="absolute left-[66%] top-[22%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-red-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-red-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             SECTOR-B-CAM-03 (Offline)
           </div>
         </div>
@@ -218,10 +212,10 @@ export const BorderOverviewMap: React.FC<Props> = ({
           onClick={() => onSelectCamera && cameras.length > 2 && onSelectCamera(cameras[2])}
           className="absolute left-[20%] top-[60%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             BOP-NORTH-02 (Online)
           </div>
         </div>
@@ -231,10 +225,10 @@ export const BorderOverviewMap: React.FC<Props> = ({
           onClick={() => onSelectCamera && cameras.length > 3 && onSelectCamera(cameras[3])}
           className="absolute left-[34%] top-[82%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             SOUTH-TRENCH-10 (Online)
           </div>
         </div>
@@ -244,10 +238,10 @@ export const BorderOverviewMap: React.FC<Props> = ({
           onClick={() => onSelectCamera && cameras.length > 4 && onSelectCamera(cameras[4])}
           className="absolute left-[70%] top-[64%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             EAST-GATE-01 (Online)
           </div>
         </div>
@@ -257,10 +251,10 @@ export const BorderOverviewMap: React.FC<Props> = ({
           onClick={() => onSelectCamera && cameras.length > 5 && onSelectCamera(cameras[5])}
           className="absolute left-[82%] top-[84%] -translate-x-1/2 -translate-y-1/2 z-20 cursor-pointer group"
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-600 border-2 border-white shadow-md flex items-center justify-center text-white group-hover:scale-110 transition-transform">
-            <Camera className="w-4 h-4" />
+          <div className="w-6 h-6 rounded-full bg-emerald-600 border-2 border-white shadow-sm flex items-center justify-center text-white group-hover:scale-115 transition-transform">
+            <Camera className="w-3 h-3" />
           </div>
-          <div className="hidden group-hover:block absolute bottom-9 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-xs font-mono px-2.5 py-1 rounded shadow-lg whitespace-nowrap border border-white/20">
+          <div className="hidden group-hover:block absolute bottom-7 left-1/2 -translate-x-1/2 bg-[#0A192F] text-white text-[10px] font-mono px-2 py-0.5 rounded shadow-md whitespace-nowrap border border-white/20">
             WEST-FENCE-04 (Online)
           </div>
         </div>
